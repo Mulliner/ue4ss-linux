@@ -6,6 +6,7 @@
 #endif
 #else
 #include <unistd.h>
+#include <dlfcn.h>
 #endif
 
 #include <algorithm>
@@ -44,6 +45,7 @@
 #include <SDKGenerator/UEHeaderGenerator.hpp>
 #include <SigScanner/SinglePassSigScanner.hpp>
 #include <Signatures.hpp>
+#include <Unreal/Signatures.hpp>
 #include <Timer/ScopedTimer.hpp>
 #include <UE4SSProgram.hpp>
 #include <Unreal/AGameMode.hpp>
@@ -875,6 +877,140 @@ namespace RC
 
         // If any Lua scripts are found, add overrides so that the Lua script can perform the aob scan instead of the Unreal API itself
         setup_lua_scan_overrides(m_working_directory, config);
+
+#ifdef __linux__
+        // On Linux, patternsleuth's ps_scan uses Windows-specific AOB patterns that will never match.
+        // Provide scan overrides that use dlsym to find functions by symbol name instead.
+        // Also set the engine version directly since we can't scan for it.
+        {
+            // Palworld uses UE5 5.1
+            Unreal::Version::Major = 5;
+            Unreal::Version::Minor = 1;
+            config.ScanOverrides.version_finder = [&]([[maybe_unused]] auto&, Unreal::Signatures::ScanResult&) {};
+
+            // Try to find functions via dlsym from the main executable
+            void* main_exe = dlopen(nullptr, RTLD_NOW);
+            if (main_exe)
+            {
+                auto try_resolve = [&](const char* symbol_name) -> void* {
+                    // Try various mangled name patterns
+                    void* ptr = dlsym(main_exe, symbol_name);
+                    if (ptr) return ptr;
+
+                    // Try with leading underscore (C linkage)
+                    std::string prefixed = std::string("_") + symbol_name;
+                    ptr = dlsym(main_exe, prefixed.c_str());
+                    return ptr;
+                };
+
+                // Override GUObjectArray scan
+                config.ScanOverrides.guobjectarray = [&](std::vector<SignatureContainer>&, Unreal::Signatures::ScanResult& scan_result) {
+                    void* addr = try_resolve("GUObjectArray");
+                    if (addr)
+                    {
+                        Unreal::UObjectArray::SetupGUObjectArrayAddress(addr);
+                        scan_result.SuccessMessage.emplace_back(STR("GUObjectArray found via dlsym"));
+                    }
+                    else
+                    {
+                        scan_result.Errors.emplace_back("GUObjectArray not found via dlsym (symbol not exported)");
+                    }
+                };
+
+                // Override FName::ToString scan
+                config.ScanOverrides.fname_to_string = [&](std::vector<SignatureContainer>&, Unreal::Signatures::ScanResult& scan_result) {
+                    void* addr = try_resolve("FName::ToString");
+                    if (!addr) addr = try_resolve("_ZN5FName8ToStringEv");
+                    if (addr)
+                    {
+                        Unreal::FName::ToStringInternal.assign_address(addr);
+                        scan_result.SuccessMessage.emplace_back(STR("FName::ToString found via dlsym"));
+                    }
+                    else
+                    {
+                        scan_result.Errors.emplace_back("FName::ToString not found via dlsym");
+                    }
+                };
+
+                // Override GameEngine::Tick scan
+                config.ScanOverrides.gameengine_tick = [&](std::vector<SignatureContainer>&, Unreal::Signatures::ScanResult& scan_result) {
+                    void* addr = try_resolve("UGameEngine::Tick");
+                    if (!addr) addr = try_resolve("_ZN11UGameEngine4TickEfd");
+                    if (addr)
+                    {
+                        Unreal::UEngine::TickInternal.assign_address(addr);
+                        scan_result.SuccessMessage.emplace_back(STR("UGameEngine::Tick found via dlsym"));
+                    }
+                    else
+                    {
+                        scan_result.Errors.emplace_back("UGameEngine::Tick not found via dlsym");
+                    }
+                };
+
+                // Override StaticConstructObject scan
+                config.ScanOverrides.static_construct_object = [&](std::vector<SignatureContainer>&, Unreal::Signatures::ScanResult& scan_result) {
+                    void* addr = try_resolve("StaticConstructObject_Internal");
+                    if (!addr) addr = try_resolve("_ZL30StaticConstructObject_Internal");
+                    if (addr)
+                    {
+                        Unreal::UObjectGlobals::SetupStaticConstructObjectInternalAddress(addr);
+                        scan_result.SuccessMessage.emplace_back(STR("StaticConstructObject found via dlsym"));
+                    }
+                    else
+                    {
+                        scan_result.Errors.emplace_back("StaticConstructObject not found via dlsym");
+                    }
+                };
+
+                // Override FMemory::Free scan
+                config.ScanOverrides.fmemory_free = [&](std::vector<SignatureContainer>&, Unreal::Signatures::ScanResult& scan_result) {
+                    void* addr = try_resolve("GMalloc");
+                    if (addr)
+                    {
+                        Unreal::GMalloc = std::bit_cast<Unreal::FMalloc**>(addr);
+                        scan_result.SuccessMessage.emplace_back(STR("GMalloc found via dlsym"));
+                    }
+                    else
+                    {
+                        scan_result.Errors.emplace_back("GMalloc not found via dlsym");
+                    }
+                };
+
+                // Override FName constructor scan
+                config.ScanOverrides.fname_constructor = [&](std::vector<SignatureContainer>&, Unreal::Signatures::ScanResult& scan_result) {
+                    void* addr = try_resolve("FName::FName");
+                    if (!addr) addr = try_resolve("_ZN5FNameC1Ev");
+                    if (addr)
+                    {
+                        Unreal::FName::ConstructorInternal.assign_address(addr);
+                        scan_result.SuccessMessage.emplace_back(STR("FName::FName found via dlsym"));
+                    }
+                    else
+                    {
+                        scan_result.Errors.emplace_back("FName::FName not found via dlsym");
+                    }
+                };
+
+                // Override GNatives scan
+                config.ScanOverrides.gnatives = [&](std::vector<SignatureContainer>&, Unreal::Signatures::ScanResult& scan_result) {
+                    void* addr = try_resolve("GNatives");
+                    if (addr)
+                    {
+                        Unreal::GNatives_Internal = reinterpret_cast<Unreal::FNativeFuncPtr*>(addr);
+                        scan_result.SuccessMessage.emplace_back(STR("GNatives found via dlsym"));
+                    }
+                    else
+                    {
+                        scan_result.Errors.emplace_back("GNatives not found via dlsym");
+                    }
+                };
+
+                dlclose(main_exe);
+            }
+
+            fprintf(stderr, "[UE4SS] Linux scan overrides configured (UE5.1, dlsym-based)\n");
+        }
+#endif
 
         // Virtual function offset overrides
         TRY([&]() {
