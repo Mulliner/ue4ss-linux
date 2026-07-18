@@ -1494,7 +1494,15 @@ namespace RC
         ProfilerSetThreadName("UE4SS-UpdateThread");
         m_event_loop_thread_id = std::this_thread::get_id();
 
+#ifdef __linux__
+        fprintf(stderr, "[UE4SS] Linux: skipping on_program_start() (mods already loaded in init())\n");
+        // Skip on_program_start() — it calls ObjectDumper::init(), registers engine tick hooks,
+        // and re-calls install_lua_mods/LuaMod::on_program_start/start_lua_mods inside a
+        // RegisterEngineTickPreCallback lambda. All of these require UE function addresses.
+        // Mods were already loaded directly in init().
+#else
         on_program_start();
+#endif
 
         FilesystemWatcher filesystem_watcher{};
         if (settings_manager.General.EnableAutoReloadingLuaMods)
@@ -1956,11 +1964,17 @@ namespace RC
                     auto mod = UE4SSProgram::find_mod_by_name<ModType>(mod_name, UE4SSProgram::IsInstalled::Yes);
                     if (!mod || !dynamic_cast<ModType*>(mod) || mod->is_started())
                     {
+#ifdef __linux__
+                        if (!mod) fprintf(stderr, "[UE4SS] Mod '%s' not found or not installed\n", std::string(mod_name.begin(), mod_name.end()).c_str());
+#endif
                         continue;
                     }
 
                     if (!mod_enabled.empty() && mod_enabled[0] == STR('1'))
                     {
+#ifdef __linux__
+                        fprintf(stderr, "[UE4SS] Starting %s mod '%s'\n", std::is_same_v<ModType, LuaMod> ? "Lua" : "C++", std::string(mod->get_name().begin(), mod->get_name().end()).c_str());
+#endif
                         Output::send(STR("Starting {} mod '{}'\n"), std::is_same_v<ModType, LuaMod> ? STR("Lua") : STR("C++"), mod->get_name().data());
                         mod->start_mod();
                     }
@@ -2021,6 +2035,9 @@ namespace RC
                 }
 
                 Output::send(STR("Mod '{}' has enabled.txt, starting mod.\n"), mod->get_name().data());
+#ifdef __linux__
+                fprintf(stderr, "[UE4SS] Mod '%s' has enabled.txt, starting mod.\n", std::string(mod->get_name().begin(), mod->get_name().end()).c_str());
+#endif
                 mod->start_mod();
             }
         }
