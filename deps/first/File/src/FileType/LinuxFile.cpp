@@ -334,31 +334,51 @@ namespace RC::File
 
     auto LinuxFile::read_all() const -> StringType
     {
-        StreamIType stream{get_file_path(), std::ios::in | std::ios::binary};
+        // Use narrow stream to read bytes, then convert to wide string
+        // Using wifstream directly causes issues because tellg() returns byte offset
+        // but resize(size) allocates size wchar_t's (4x the memory on Linux)
+        std::ifstream stream{get_file_path(), std::ios::in | std::ios::binary};
         if (!stream)
         {
             THROW_INTERNAL_FILE_ERROR(fmt::format("[LinuxFile::read_all] Tried to read entire file but returned error {}", errno))
         }
 
-        File::StreamIType::off_type start{};
-        File::CharType bom[3]{};
+        // Check and skip BOM
+        std::streamoff start{};
+        char bom[3]{};
         stream.read(bom, 3);
         if (bom[0] == 0xEF && bom[1] == 0xBB && bom[2] == 0xBF)
         {
             start = 3;
         }
+        else
+        {
+            stream.seekg(0, std::ios::beg);
+        }
 
-        StringType file_contents;
+        // Read remaining bytes
         stream.seekg(0, std::ios::end);
         auto size = stream.tellg();
-        if (size == -1)
+        if (size <= 0)
         {
+            stream.close();
             return {};
         }
-        file_contents.resize(size);
+        auto byte_count = static_cast<size_t>(size) - static_cast<size_t>(start);
+        std::string raw_bytes;
+        raw_bytes.resize(byte_count);
         stream.seekg(start, std::ios::beg);
-        stream.read(&file_contents[0], file_contents.size());
+        stream.read(raw_bytes.data(), byte_count);
         stream.close();
+
+        // Convert each byte to a wchar_t (ASCII-safe conversion)
+        // The INI parser works with wchar_t strings on Linux
+        StringType file_contents;
+        file_contents.reserve(byte_count);
+        for (size_t i = 0; i < byte_count; ++i)
+        {
+            file_contents.push_back(static_cast<CharType>(static_cast<unsigned char>(raw_bytes[i])));
+        }
         return file_contents;
     }
 

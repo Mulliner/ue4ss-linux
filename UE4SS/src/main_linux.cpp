@@ -110,7 +110,9 @@ static auto is_game_process() -> bool
     if (exe_name.find("crashpad") != std::string::npos ||
         exe_name.find("Crashpad") != std::string::npos ||
         exe_name.find("crash_reporter") != std::string::npos ||
-        exe_name.find("EpicServices") != std::string::npos)
+        exe_name.find("EpicServices") != std::string::npos ||
+        exe_name == "dash" || exe_name == "bash" || exe_name == "sh" ||
+        exe_name == "zsh" || exe_name == "csh" || exe_name == "ksh")
     {
         fprintf(stderr, "[UE4SS] Skipping non-game process: %s\n", exe_path.c_str());
         return false;
