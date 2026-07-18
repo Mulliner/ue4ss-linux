@@ -20,6 +20,45 @@
 #include <Profiler/Profiler.hpp>
 #include <SigScanner/SinglePassSigScanner.hpp>
 
+// Linux: Helper to parse /proc/self/maps and get readable memory regions
+#ifndef _WIN32
+struct MemoryRegion
+{
+    uint8_t* start;
+    uint8_t* end;
+};
+
+static std::vector<MemoryRegion> get_readable_regions(uint8_t* scan_start, uint8_t* scan_end)
+{
+    std::vector<MemoryRegion> regions;
+    FILE* maps = fopen("/proc/self/maps", "r");
+    if (!maps) return regions;
+
+    char line[512];
+    while (fgets(line, sizeof(line), maps))
+    {
+        unsigned long start, end;
+        char perms[8];
+        if (sscanf(line, "%lx-%lx %7s", &start, &end, perms) >= 3)
+        {
+            if (perms[0] != 'r') continue;
+
+            uint8_t* region_start = reinterpret_cast<uint8_t*>(start);
+            uint8_t* region_end = reinterpret_cast<uint8_t*>(end);
+
+            if (region_end <= scan_start || region_start >= scan_end) continue;
+
+            if (region_start < scan_start) region_start = scan_start;
+            if (region_end > scan_end) region_end = scan_end;
+
+            regions.push_back({region_start, region_end});
+        }
+    }
+    fclose(maps);
+    return regions;
+}
+#endif
+
 namespace RC
 {
     ScanTargetArray SigScannerStaticData::m_modules_info;
@@ -425,16 +464,21 @@ namespace RC
             }
         }
 #else
-        // On Linux, we can directly scan the module memory since we know the base and size
+        // On Linux, use /proc/self/maps to find readable regions and scan safely
         size_t string_size_bytes = string_to_scan_for.size() * sizeof(wchar_t);
-        for (uint8_t* i = start_address; i + string_size_bytes <= end_address; ++i)
+        auto regions = get_readable_regions(start_address, end_address);
+        for (auto& [region_start, region_end] : regions)
         {
-            std::wstring_view maybe_string = std::wstring_view(reinterpret_cast<const wchar_t*>(i), string_to_scan_for.size());
-            if (maybe_string == string_to_scan_for)
+            for (uint8_t* i = region_start; i + string_size_bytes <= region_end; ++i)
             {
-                address_found = i;
-                break;
+                std::wstring_view maybe_string = std::wstring_view(reinterpret_cast<const wchar_t*>(i), string_to_scan_for.size());
+                if (maybe_string == string_to_scan_for)
+                {
+                    address_found = i;
+                    break;
+                }
             }
+            if (address_found) break;
         }
 #endif
 
@@ -673,71 +717,77 @@ namespace RC
                 ++i;
             }
 #else
-            // On Linux, scan directly without VirtualQuery
-            bool skip_to_next_container{};
-
-            for (size_t container_index = 0; const auto& int_container : vector_of_sigs)
+        // On Linux, use /proc/self/maps to find readable regions and scan safely
+        auto regions = get_readable_regions(start_address, end_address);
+        for (auto& [region_start, region_end] : regions)
+        {
+            for (uint8_t* i = region_start; i < region_end; ++i)
             {
-                for (size_t signature_index = 0; const auto& sig : int_container)
+                bool skip_to_next_container{};
+
+                for (size_t container_index = 0; const auto& int_container : vector_of_sigs)
                 {
-                    if (signature_containers[container_index].ignore)
+                    for (size_t signature_index = 0; const auto& sig : int_container)
                     {
-                        break;
-                    }
-
-                    if (i + (sig.size() / 2) > end_address)
-                    {
-                        break;
-                    }
-
-                    for (size_t sig_i = 0; sig_i < sig.size(); sig_i += 2)
-                    {
-                        if (sig.at(sig_i) != -1 && sig.at(sig_i) != HI_NIBBLE(*(uint8_t*)(i + (sig_i / 2))) ||
-                            sig.at(sig_i + 1) != -1 && sig.at(sig_i + 1) != LO_NIBBLE(*(uint8_t*)(i + (sig_i / 2))))
+                        if (signature_containers[container_index].ignore)
                         {
                             break;
                         }
 
-                        if (sig_i + 2 == sig.size())
+                        if (i + (sig.size() / 2) > region_end)
                         {
+                            break;
+                        }
+
+                        for (size_t sig_i = 0; sig_i < sig.size(); sig_i += 2)
+                        {
+                            if (sig.at(sig_i) != -1 && sig.at(sig_i) != HI_NIBBLE(*(uint8_t*)(i + (sig_i / 2))) ||
+                                sig.at(sig_i + 1) != -1 && sig.at(sig_i + 1) != LO_NIBBLE(*(uint8_t*)(i + (sig_i / 2))))
                             {
-                                std::lock_guard<std::mutex> safe_scope(m_scanner_mutex);
-
-                                if (signature_containers[container_index].ignore)
-                                {
-                                    skip_to_next_container = true;
-                                    break;
-                                }
-
-                                signature_containers[container_index].index_into_signatures = signature_index;
-                                signature_containers[container_index].match_address = i;
-                                signature_containers[container_index].match_signature_size = sig.size() / 2;
-
-                                skip_to_next_container = signature_containers[container_index].on_match_found(signature_containers[container_index]);
-                                signature_containers[container_index].ignore = skip_to_next_container;
-
-                                if (signature_containers[container_index].store_results)
-                                {
-                                    signature_containers[container_index].result_store.emplace_back(
-                                            SignatureContainerLight{.index_into_signatures = signature_index, .match_address = i});
-                                }
+                                break;
                             }
 
+                            if (sig_i + 2 == sig.size())
+                            {
+                                {
+                                    std::lock_guard<std::mutex> safe_scope(m_scanner_mutex);
+
+                                    if (signature_containers[container_index].ignore)
+                                    {
+                                        skip_to_next_container = true;
+                                        break;
+                                    }
+
+                                    signature_containers[container_index].index_into_signatures = signature_index;
+                                    signature_containers[container_index].match_address = i;
+                                    signature_containers[container_index].match_signature_size = sig.size() / 2;
+
+                                    skip_to_next_container = signature_containers[container_index].on_match_found(signature_containers[container_index]);
+                                    signature_containers[container_index].ignore = skip_to_next_container;
+
+                                    if (signature_containers[container_index].store_results)
+                                    {
+                                        signature_containers[container_index].result_store.emplace_back(
+                                                SignatureContainerLight{.index_into_signatures = signature_index, .match_address = i});
+                                    }
+                                }
+
+                                break;
+                            }
+                        }
+
+                        if (skip_to_next_container)
+                        {
                             break;
                         }
+
+                        ++signature_index;
                     }
 
-                    if (skip_to_next_container)
-                    {
-                        break;
-                    }
-
-                    ++signature_index;
+                    ++container_index;
                 }
-
-                ++container_index;
             }
-            ++i;
+        }
 #endif
         }
     }
@@ -822,15 +872,14 @@ namespace RC
             uint8_t* region_start = static_cast<uint8_t*>(memory_info.BaseAddress);
             uint8_t* region_end = region_start + memory_info.RegionSize;
 #else
-        // On Linux, scan the entire range directly
+        // On Linux, use /proc/self/maps to find readable regions and scan safely
+        auto regions = get_readable_regions(start_address, end_address);
+        for (auto& [region_start, region_end] : regions)
         {
-            uint8_t* region_start = start_address;
-            uint8_t* region_end = end_address;
+            auto scan_start = region_start;
+            auto scan_end = region_end;
 #endif
 
-            auto scan_start = (region_start > start_address) ? region_start : start_address;
-            auto scan_end = (region_end < end_address) ? region_end : end_address;
-        
             // Loop everything
             for (size_t container_index = 0; const auto& patterns : pattern_datas)
             {
@@ -948,6 +997,12 @@ namespace RC
             {
                 // No containers means no scanning was actually done.
                 // We can return safely to the caller.
+                return;
+            }
+
+            // Safety check: if module base is null, we can't scan
+            if (merged_module_info.lpBaseOfDll == nullptr || merged_module_info.SizeOfImage == 0)
+            {
                 return;
             }
 
