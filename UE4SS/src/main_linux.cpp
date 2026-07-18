@@ -101,18 +101,6 @@ static auto wait_for_game_ready() -> void
 
 static auto thread_dll_start() -> void
 {
-    // Install our signal handlers so we can recover from segfaults during init
-    install_signal_handlers();
-
-    int sig = sigsetjmp(s_init_jmpbuf, 1);
-    if (sig != 0)
-    {
-        fprintf(stderr, "[UE4SS] Recovered from signal %d. UE4SS init failed but game should continue.\n", sig);
-        restore_signal_handlers();
-        return;
-    }
-    s_has_jmpbuf = true;
-
     try
     {
         wait_for_game_ready();
@@ -120,12 +108,33 @@ static auto thread_dll_start() -> void
         auto module_path = get_module_path();
         fprintf(stderr, "[UE4SS] Library path: %s\n", module_path.string().c_str());
 
+        // Install signal handlers right before UE4SS init - the game may have
+        // installed its own crash handler after our library loaded
+        install_signal_handlers();
+
+        // Set up recovery point - if we crash, we jump back here
+        int sig = sigsetjmp(s_init_jmpbuf, 1);
+        if (sig != 0)
+        {
+            fprintf(stderr, "[UE4SS] Recovered from signal %d. UE4SS init failed but game should continue.\n", sig);
+            s_has_jmpbuf = false;
+            restore_signal_handlers();
+            return;
+        }
+        s_has_jmpbuf = true;
+
         fprintf(stderr, "[UE4SS] Creating UE4SSProgram instance...\n");
         s_program = new UE4SSProgram(module_path, {});
+
+        // Re-install signal handlers in case the constructor overwrote them
+        install_signal_handlers();
 
         fprintf(stderr, "[UE4SS] Calling init()...\n");
         s_program->init();
         fprintf(stderr, "[UE4SS] init() completed successfully.\n");
+
+        s_has_jmpbuf = false;
+        restore_signal_handlers();
 
         if (auto e = s_program->get_error_object(); e->has_error())
         {

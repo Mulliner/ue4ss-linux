@@ -205,7 +205,9 @@ namespace RC
 
         try
         {
+            fprintf(stderr, "[UE4SS] Constructor: calling setup_paths()...\n");
             setup_paths(moduleFilePath);
+            fprintf(stderr, "[UE4SS] Constructor: setup_paths() done. root=%s\n", m_root_directory.string().c_str());
 
             // Auto-create UE4SS-settings.ini with default content if it doesn't exist
             if (!std::filesystem::exists(m_settings_path_and_file))
@@ -282,9 +284,11 @@ namespace RC
                 }
             }
 
+            fprintf(stderr, "[UE4SS] Constructor: deserializing settings from %s...\n", m_settings_path_and_file.string().c_str());
             try
             {
                 settings_manager.deserialize(m_settings_path_and_file);
+                fprintf(stderr, "[UE4SS] Constructor: settings deserialized.\n");
             }
             catch (std::exception& e)
             {
@@ -300,12 +304,14 @@ namespace RC
                 }
             }
 
+            fprintf(stderr, "[UE4SS] Constructor: checking crash dump settings...\n");
             if (settings_manager.CrashDump.EnableDumping)
             {
                 m_crash_dumper.enable();
             }
 
             m_crash_dumper.set_full_memory_dump(settings_manager.CrashDump.FullMemoryDump);
+            fprintf(stderr, "[UE4SS] Constructor: done.\n");
 
 #ifdef HAS_GUI
             m_debugging_gui.set_gfx_backend(settings_manager.Debug.GraphicsAPI);
