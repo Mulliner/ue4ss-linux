@@ -1715,6 +1715,19 @@ namespace RC
                 bool has_bom = (bom[0] == '\xEF' && bom[1] == '\xBB' && bom[2] == '\xBF');
                 bom_check.close();
 
+#ifdef __linux__
+                // On Linux, use narrow stream and convert to wide string
+                // wifstream causes SIGSEGV because it tries to read 4-byte wchar_t from ASCII files
+                std::ifstream mods_stream_narrow(enabled_mods_file);
+                std::string narrow_line;
+                while (std::getline(mods_stream_narrow, narrow_line))
+                {
+                    StringType current_line;
+                    for (char c : narrow_line)
+                    {
+                        current_line.push_back(static_cast<CharType>(static_cast<unsigned char>(c)));
+                    }
+#else
                 // Now open the actual stream
                 StreamIType mods_stream{enabled_mods_file};
 
@@ -1728,6 +1741,7 @@ namespace RC
                 StringType current_line;
                 while (std::getline(mods_stream, current_line))
                 {
+#endif
                     // Don't parse any lines with ';'
                     if (current_line.find(STR(";")) != current_line.npos)
                     {
