@@ -5760,25 +5760,66 @@ Overloads:
     {
         try
         {
+#ifdef __linux__
+            fprintf(stderr, "[UE4SS] prepare_mod: '%s' calling open_all_libs()...\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
+#endif
             lua.open_all_libs();
+#ifdef __linux__
+            fprintf(stderr, "[UE4SS] prepare_mod: '%s' open_all_libs() done.\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
+            fprintf(stderr, "[UE4SS] prepare_mod: '%s' calling setup_lua_require_paths()...\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
+#endif
             setup_lua_require_paths(lua);
+#ifdef __linux__
+            fprintf(stderr, "[UE4SS] prepare_mod: '%s' setup_lua_require_paths() done.\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
+            fprintf(stderr, "[UE4SS] prepare_mod: '%s' calling setup_lua_global_functions()...\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
+#endif
             setup_lua_global_functions(lua);
+#ifdef __linux__
+            fprintf(stderr, "[UE4SS] prepare_mod: '%s' setup_lua_global_functions() done.\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
+            fprintf(stderr, "[UE4SS] prepare_mod: '%s' calling setup_lua_classes()...\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
+#endif
             setup_lua_classes(lua);
+#ifdef __linux__
+            fprintf(stderr, "[UE4SS] prepare_mod: '%s' setup_lua_classes() done.\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
+            fprintf(stderr, "[UE4SS] prepare_mod: '%s' calling LuaModRef::construct()...\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
+#endif
 
             // Setup a global reference for this mod
             // It can be accessed later when you otherwise don't have access to the 'Mod' instance
             LuaType::LuaModRef::construct(lua, this);
             lua_setglobal(lua.get_lua_state(), "ModRef");
+#ifdef __linux__
+            fprintf(stderr, "[UE4SS] prepare_mod: '%s' LuaModRef::construct() done.\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
+            fprintf(stderr, "[UE4SS] prepare_mod: '%s' calling register_input_globals()...\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
+#endif
 
             // Setup all the input related globals (keys & modifier keys)
             register_input_globals(lua);
+#ifdef __linux__
+            fprintf(stderr, "[UE4SS] prepare_mod: '%s' register_input_globals() done.\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
+            fprintf(stderr, "[UE4SS] prepare_mod: '%s' calling register_all_property_types()...\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
+#endif
 
             register_all_property_types(lua);
+#ifdef __linux__
+            fprintf(stderr, "[UE4SS] prepare_mod: '%s' register_all_property_types() done.\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
+            fprintf(stderr, "[UE4SS] prepare_mod: '%s' calling register_object_flags()...\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
+#endif
             register_object_flags(lua);
+#ifdef __linux__
+            fprintf(stderr, "[UE4SS] prepare_mod: '%s' register_object_flags() done.\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
+            fprintf(stderr, "[UE4SS] prepare_mod: '%s' calling register_efindname()...\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
+#endif
             register_efindname(lua);
+#ifdef __linux__
+            fprintf(stderr, "[UE4SS] prepare_mod: '%s' register_efindname() done.\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
+#endif
 
             lua.set_nil();
             lua_setglobal(lua.get_lua_state(), "__OriginalReturnValue");
+#ifdef __linux__
+            fprintf(stderr, "[UE4SS] prepare_mod: '%s' completed successfully.\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
+#endif
         }
         catch (std::exception& e)
         {
