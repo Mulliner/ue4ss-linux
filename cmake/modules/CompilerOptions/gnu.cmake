@@ -1,4 +1,4 @@
-set(DEFAULT_COMPILER_FLAGS "-fms-extensions" PARENT_SCOPE)
+set(DEFAULT_COMPILER_FLAGS "" PARENT_SCOPE)
 
 set(LINKER_FLAGS "" PARENT_SCOPE)
 set(DEFAULT_SHARED_LINKER_FLAGS "${LINKER_FLAGS}" PARENT_SCOPE)
@@ -8,6 +8,3 @@ set(Shipping_FLAGS "" PARENT_SCOPE)
 
 # Compiler-specific definitions
 # Currently no GNU-specific definitions needed
-# add_compile_definitions(
-#     # Add GNU-specific definitions here if needed
-# )

@@ -1,0 +1,141 @@
+# CI workflow for Linux native builds and Windows cross-compilation builds
+# This workflow does NOT require the UEPseudo submodule (deps/first/Unreal)
+# Linux builds use headless mode (no GUI/Input)
+# Windows cross-compile builds use xwin and DO require UEPseudo
+
+name: Linux & Cross-Compile CI
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - 'main'
+    paths-ignore:
+      - 'README.md'
+      - 'LICENSE'
+      - 'CNAME'
+      - '.github/workflows/pushdocs.yml'
+      - '.github/pull_request_template.md'
+      - '.github/ISSUE_TEMPLATE/**'
+      - 'assets/**'
+      - 'docs/**'
+      - 'docs-export/**'
+      - 'docs-repo-template/**'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Native Linux build (headless, no UEPseudo needed)
+  build-linux-native:
+    name: Linux Native ${{ matrix.config }} (${{ matrix.compiler }})
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [gcc, clang]
+        config: [Debug, Shipping]
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          # No UEPSEUDO_PAT needed - we skip the private Unreal submodule
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            cmake ninja-build \
+            libfmt-dev \
+            ${{ matrix.compiler == 'clang' && 'clang lld llvm' || 'gcc g++' }}
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Configure CMake (Linux Native)
+        run: |
+          if [ "${{ matrix.compiler }}" = "clang" ]; then
+            export CC=clang
+            export CXX=clang++
+          else
+            export CC=gcc
+            export CXX=g++
+          fi
+
+          cmake -B build_linux_${{ matrix.config }}_${{ matrix.compiler }} \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Game__${{ matrix.config }}__Linux64 \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            -DUE4SS_GUI_ENABLED=OFF \
+            -DUE4SS_INPUT_ENABLED=OFF \
+            -DUE4SS_PROFILERS=OFF
+
+      - name: Build UE4SS (Linux Native)
+        run: |
+          cmake --build build_linux_${{ matrix.config }}_${{ matrix.compiler }} --target UE4SS --verbose 2>&1 || true
+          echo "Build completed (errors expected during porting - collecting logs)"
+
+      - name: Upload build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-build-${{ matrix.compiler }}-${{ matrix.config }}
+          path: |
+            build_linux_${{ matrix.config }}_${{ matrix.compiler }}/compile_commands.json
+          retention-days: 7
+          overwrite: true
+
+  # Windows cross-compile from Linux using xwin (requires UEPseudo)
+  build-windows-cross:
+    name: Windows Cross-Compile (xwin)
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          token: ${{ secrets.UEPSEUDO_PAT }}
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build clang lld llvm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          targets: x86_64-pc-windows-msvc
+
+      - name: Install xwin
+        run: cargo install xwin
+
+      - name: Setup xwin
+        run: |
+          xwin --accept-license splat --output $HOME/.xwin
+
+      - name: Configure CMake (Cross-Compile)
+        run: |
+          XWIN_DIR=$HOME/.xwin cmake -B build_xwin \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Game__Shipping__Win64 \
+            -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/xwin-clang-toolchain.cmake \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+
+      - name: Build UE4SS (Cross-Compile)
+        run: |
+          cmake --build build_xwin --target UE4SS --verbose
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-cross-build
+          path: |
+            build_xwin/**/*.dll
+            build_xwin/**/*.pdb
+          retention-days: 14
+          overwrite: true

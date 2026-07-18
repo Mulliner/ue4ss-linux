@@ -55,6 +55,23 @@ message("UE4SS Version: ${UE4SS_LIB_VERSION_MAJOR}.${UE4SS_LIB_VERSION_MINOR}.${
 file(GLOB_RECURSE UE4SS_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/**.cpp")
 file(GLOB_RECURSE UE4SS_HEADERS "${CMAKE_CURRENT_SOURCE_DIR}/include/**.hpp")
 
+# Filter out GUI sources when GUI is disabled
+if(NOT UE4SS_GUI_ENABLED)
+    list(FILTER UE4SS_SOURCES EXCLUDE REGEX "/GUI/")
+    list(FILTER UE4SS_HEADERS EXCLUDE REGEX "/GUI/")
+endif()
+
+# Filter out Input sources when Input is disabled
+if(NOT UE4SS_INPUT_ENABLED)
+    list(FILTER UE4SS_SOURCES EXCLUDE REGEX "/Input/")
+    list(FILTER UE4SS_HEADERS EXCLUDE REGEX "/Input/")
+endif()
+
+# Filter out Windows-only entry point on Linux
+if(NOT WIN32)
+    list(FILTER UE4SS_SOURCES EXCLUDE REGEX "main_ue4ss_rewritten")
+endif()
+
 # Create the main library
 add_library(UE4SS SHARED ${UE4SS_SOURCES})
 
@@ -79,6 +96,11 @@ target_compile_definitions(UE4SS PUBLIC
     UE4SS_LIB_BUILD_GITSHA="${UE4SS_LIB_BUILD_GITSHA}"
     UE4SS_CONFIGURATION="$<CONFIG>"
 )
+
+# On Linux, TCHAR is char16_t so we need STR to produce char16_t strings
+if(NOT WIN32)
+    target_compile_definitions(UE4SS PUBLIC FORCE_U16)
+endif()
 
 # Add headers as sources for IDE integration
 target_sources(UE4SS PUBLIC
@@ -116,6 +138,11 @@ target_compile_definitions(UE4SS PRIVATE
     RC_LUA_WRAPPER_GENERATOR_BUILD_STATIC
 )
 
+# Suppress GCC 15 -Wchanges-meaning warning (member variables with same name as type)
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    target_compile_options(UE4SS PRIVATE -Wno-changes-meaning -Wno-template-body)
+endif()
+
 # ---------------------------------------------------------------------------
 # Dependencies
 # ---------------------------------------------------------------------------
@@ -130,12 +157,24 @@ target_link_libraries(UE4SS PUBLIC
     patternsleuth_bind
 )
 
-# Link third-party dependencies
-target_link_libraries(UE4SS PUBLIC
-    fmt ImGui PolyHook_2 
-    d3d11 glfw glad opengl32 
-    dbghelp psapi ws2_32 ntdll userenv
-)
+# Link third-party dependencies - platform specific
+if(WIN32)
+    target_link_libraries(UE4SS PUBLIC
+        fmt ImGui PolyHook_2
+        d3d11 glfw glad opengl32
+        dbghelp psapi ws2_32 ntdll userenv
+    )
+else()
+    target_link_libraries(UE4SS PUBLIC
+        fmt
+        dl
+        pthread
+    )
+    # GUI/Input libs are optional on Linux (headless server mode)
+    # Uncomment these when GUI support is added for Linux
+    # find_package(glfw3 REQUIRED)
+    # target_link_libraries(UE4SS PUBLIC ImGui glfw glad)
+endif()
 
 # ---------------------------------------------------------------------------
 # Output Configuration
@@ -146,7 +185,9 @@ set_property(TARGET UE4SS PROPERTY INTERPROCEDURAL_OPTIMIZATION ON)
 
 # Set runtime library to dynamic CRT (/MD, /MDd)
 # This matches Visual Studio's default, so external mods don't need to set it explicitly.
-set_property(TARGET UE4SS PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
+if(MSVC)
+    set_property(TARGET UE4SS PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
+endif()
 
 # Set output name and standard
 set_target_properties(UE4SS PROPERTIES 

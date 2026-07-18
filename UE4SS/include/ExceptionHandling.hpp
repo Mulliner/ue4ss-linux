@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stdexcept>
+#include <cstdio>
 
 #include <DynamicOutput/DynamicOutput.hpp>
 #include <Helpers/String.hpp>
@@ -12,7 +13,7 @@
     }                                                                                                                                                          \
     else                                                                                                                                                       \
     {                                                                                                                                                          \
-        printf_s("Internal Error: %s\n", e.what());                                                                                                            \
+        std::printf("Internal Error: %s\n", e.what());                                                                                                            \
     }
 
 #ifndef SEH_DISABLE

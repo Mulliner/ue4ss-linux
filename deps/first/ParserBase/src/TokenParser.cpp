@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <ParserBase/Token.hpp>
 #include <ParserBase/TokenParser.hpp>
 #include <ParserBase/Tokenizer.hpp>

@@ -1,10 +1,20 @@
+#include <algorithm>
 #include <format>
 #include <future>
 #include <regex>
 
+#ifdef _WIN32
 #define NOMINMAX
 #include <Windows.h>
 #include <Psapi.h>
+#else
+#include <cstdio>
+#include <cstring>
+#include <dlfcn.h>
+#include <link.h>
+#include <sys/mman.h>
+#include <unistd.h>
+#endif
 
 #include <fmt/core.h>
 #include <Profiler/Profiler.hpp>
@@ -366,10 +376,11 @@ namespace RC
         auto start_address = static_cast<uint8_t*>(module.lpBaseOfDll);
         auto end_address = static_cast<uint8_t*>(module.lpBaseOfDll) + module.SizeOfImage;
 
+        void* address_found{};
+
+#ifdef _WIN32
         MEMORY_BASIC_INFORMATION memory_info{};
         DWORD protect_flags = PAGE_GUARD | PAGE_NOACCESS;
-
-        void* address_found{};
 
         for (uint8_t* i = start_address; i < end_address;)
         {
@@ -413,6 +424,19 @@ namespace RC
                 ++i;
             }
         }
+#else
+        // On Linux, we can directly scan the module memory since we know the base and size
+        size_t string_size_bytes = string_to_scan_for.size() * sizeof(wchar_t);
+        for (uint8_t* i = start_address; i + string_size_bytes <= end_address; ++i)
+        {
+            std::wstring_view maybe_string = std::wstring_view(reinterpret_cast<const wchar_t*>(i), string_to_scan_for.size());
+            if (maybe_string == string_to_scan_for)
+            {
+                address_found = i;
+                break;
+            }
+        }
+#endif
 
         return address_found;
     }
@@ -520,9 +544,6 @@ namespace RC
             end_address = static_cast<uint8_t*>(info.lpMaximumApplicationAddress);
         }
 
-        MEMORY_BASIC_INFORMATION memory_info{};
-        DWORD protect_flags = PAGE_GUARD | PAGE_NOACCESS;
-
         // TODO: Nasty nasty nasty. Come up with a better solution... wtf
         // It should ideally be able to work with the char* directly instead of converting to to vectors of ints
         // The reason why working directly with the char* is a problem is that it's expensive to convert a hex char to an int
@@ -538,18 +559,6 @@ namespace RC
         vector_of_sigs.reserve(signature_containers.size());
         for (const auto& container : signature_containers)
         {
-            // Only continue if the signature is properly formatted
-            // Bring this code back when both:
-            // A. The regex has been updated to take into consideration.
-            // B. The threads have been synced before the scan to verify that all threads are scanning for valid signatures.
-            // for (const auto& signature_data : container.signatures)
-            //{
-            //    if (!std::regex_search(signature_data.signature, signature_validity_regex))
-            //    {
-            //        throw std::runtime_error{fmt::format("[SinglePassSigScanner::start_scan] A signature is improperly formatted. Signature: {}", signature_data.signature)};
-            //    }
-            //}
-
             // Signatures for this container
             vector_of_sigs.emplace_back(string_to_vector(container.signatures));
         }
@@ -557,7 +566,10 @@ namespace RC
         // Loop everything
         for (uint8_t* i = start_address; i < end_address;)
         {
+#ifdef _WIN32
             // Populate memory_info if VirtualQuery doesn't fail
+            MEMORY_BASIC_INFORMATION memory_info{};
+            DWORD protect_flags = PAGE_GUARD | PAGE_NOACCESS;
             if (VirtualQuery(i, &memory_info, sizeof(memory_info)))
             {
                 // If the "protect flags" or state are undesired for this region then skip to the next iteration of the loop
@@ -660,6 +672,73 @@ namespace RC
             {
                 ++i;
             }
+#else
+            // On Linux, scan directly without VirtualQuery
+            bool skip_to_next_container{};
+
+            for (size_t container_index = 0; const auto& int_container : vector_of_sigs)
+            {
+                for (size_t signature_index = 0; const auto& sig : int_container)
+                {
+                    if (signature_containers[container_index].ignore)
+                    {
+                        break;
+                    }
+
+                    if (i + (sig.size() / 2) > end_address)
+                    {
+                        break;
+                    }
+
+                    for (size_t sig_i = 0; sig_i < sig.size(); sig_i += 2)
+                    {
+                        if (sig.at(sig_i) != -1 && sig.at(sig_i) != HI_NIBBLE(*(uint8_t*)(i + (sig_i / 2))) ||
+                            sig.at(sig_i + 1) != -1 && sig.at(sig_i + 1) != LO_NIBBLE(*(uint8_t*)(i + (sig_i / 2))))
+                        {
+                            break;
+                        }
+
+                        if (sig_i + 2 == sig.size())
+                        {
+                            {
+                                std::lock_guard<std::mutex> safe_scope(m_scanner_mutex);
+
+                                if (signature_containers[container_index].ignore)
+                                {
+                                    skip_to_next_container = true;
+                                    break;
+                                }
+
+                                signature_containers[container_index].index_into_signatures = signature_index;
+                                signature_containers[container_index].match_address = i;
+                                signature_containers[container_index].match_signature_size = sig.size() / 2;
+
+                                skip_to_next_container = signature_containers[container_index].on_match_found(signature_containers[container_index]);
+                                signature_containers[container_index].ignore = skip_to_next_container;
+
+                                if (signature_containers[container_index].store_results)
+                                {
+                                    signature_containers[container_index].result_store.emplace_back(
+                                            SignatureContainerLight{.index_into_signatures = signature_index, .match_address = i});
+                                }
+                            }
+
+                            break;
+                        }
+                    }
+
+                    if (skip_to_next_container)
+                    {
+                        break;
+                    }
+
+                    ++signature_index;
+                }
+
+                ++container_index;
+            }
+            ++i;
+#endif
         }
     }
 
@@ -721,6 +800,7 @@ namespace RC
             }
         }
 
+#ifdef _WIN32
         MEMORY_BASIC_INFORMATION memory_info{};
         DWORD readable_flags = PAGE_READONLY | PAGE_READWRITE | PAGE_WRITECOPY |
                                PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY;
@@ -741,7 +821,13 @@ namespace RC
 
             uint8_t* region_start = static_cast<uint8_t*>(memory_info.BaseAddress);
             uint8_t* region_end = region_start + memory_info.RegionSize;
-            
+#else
+        // On Linux, scan the entire range directly
+        {
+            uint8_t* region_start = start_address;
+            uint8_t* region_end = end_address;
+#endif
+
             auto scan_start = (region_start > start_address) ? region_start : start_address;
             auto scan_end = (region_end < end_address) ? region_end : end_address;
         
@@ -820,14 +906,25 @@ namespace RC
                 }
                 ++container_index;
             }
+#ifdef _WIN32
             i = region_end;
         }
+#else
+        }
+#endif
     }
 
     auto SinglePassScanner::start_scan(SignatureContainerMap& signature_containers) -> void
     {
         SYSTEM_INFO info{};
+#ifdef _WIN32
         GetSystemInfo(&info);
+#else
+        // On Linux, set reasonable defaults for memory scanning
+        info.lpMinimumApplicationAddress = nullptr;
+        info.lpMaximumApplicationAddress = reinterpret_cast<void*>(UINTPTR_MAX);
+        info.dwPageSize = sysconf(_SC_PAGESIZE);
+#endif
 
         // If not modular then the containers get merged into one scan target
         // That way there are no extra scans

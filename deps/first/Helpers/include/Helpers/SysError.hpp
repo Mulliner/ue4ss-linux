@@ -1,6 +1,11 @@
 #pragma once
 
 #include <system_error>
+#include <string>
+
+#ifdef __linux__
+#include <Helpers/String.hpp>
+#endif
 
 namespace RC
 {
@@ -63,6 +68,12 @@ namespace RC
          * @return a pointer to the c-string representation of the string object's value
          */
         [[nodiscard]] auto c_str() const noexcept -> const CharType* { return m_error_text.c_str(); }
+#ifdef __linux__
+        [[nodiscard]] auto str() const -> std::string
+        {
+            return RC::to_string(m_error_text);
+        }
+#endif
         /**
          * Returns the name of the error category
          * @return the name of the error category

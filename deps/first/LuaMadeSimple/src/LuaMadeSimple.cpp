@@ -1,7 +1,12 @@
 #include <algorithm>
+#include <cstdio>
 #include <mutex>
 #include <stdexcept>
 #include <vector>
+
+#ifndef _WIN32
+#define printf_s printf
+#endif
 
 #include <LuaMadeSimple/LuaMadeSimple.hpp>
 #include <LuaMadeSimple/LuaObject.hpp>

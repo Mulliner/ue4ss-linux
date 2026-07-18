@@ -175,6 +175,42 @@ namespace RC
     }
     /* explode_by_occurrence -> END */
 
+#ifdef FORCE_U16
+    // When FORCE_U16 is defined, to_wstring returns std::u16string to match CharType
+    auto inline to_wstring(const std::string& input) -> std::u16string
+    {
+        static std::wstring_convert<std::codecvt_utf8_utf16<char16_t>, char16_t> converter{};
+        return converter.from_bytes(input);
+    }
+
+    auto inline to_wstring(const char* pInput) -> std::u16string
+    {
+        return to_wstring(std::string{pInput});
+    }
+
+    auto inline to_wstring(std::string_view input) -> std::u16string
+    {
+        static std::wstring_convert<std::codecvt_utf8<char16_t>, char16_t> converter{};
+        return converter.from_bytes(input.data(), input.data() + input.length());
+    }
+
+    auto inline to_wstring(const std::u16string& input) -> std::u16string
+    {
+        return input;
+    }
+
+    auto inline to_wstring(std::u16string_view input) -> std::u16string
+    {
+        return std::u16string{input};
+    }
+
+    auto inline to_wstring(const std::wstring& input) -> std::u16string
+    {
+        static std::wstring_convert<std::codecvt_utf8<wchar_t>> wconv{};
+        std::string utf8 = wconv.to_bytes(input);
+        return to_wstring(utf8);
+    }
+#else
     auto inline to_wstring(const std::string& input) -> std::wstring
     {
 #pragma warning(disable : 4996)
@@ -236,6 +272,7 @@ namespace RC
         throw std::runtime_error{"There is no reason to use this function on non-Windows platforms"};
 #endif
     }
+#endif
 
     auto inline to_string(const std::wstring& input) -> std::string
     {
@@ -568,7 +605,7 @@ namespace RC
      * @return Wide string (UTF-16) for Windows APIs
      * @throws std::runtime_error if conversion fails
      */
-    auto inline utf8_to_wpath(const std::string& utf8_path) -> std::wstring
+    auto inline utf8_to_wpath(const std::string& utf8_path) -> StringType
     {
         // No fallbacks - if this fails, it should throw since it's a critical error
         // that indicates invalid UTF-8 input

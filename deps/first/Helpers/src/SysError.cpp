@@ -64,12 +64,12 @@ namespace RC
         const std::error_category& error_category = *m_error_category;
         const std::error_code ec(error_code, error_category);
         // remove new line(s) and tabs
-        auto result = std::regex_replace(to_wstring(std::system_error(ec).what()), std::wregex(L"(\t|\r?\n)"), L" ");
+        auto result = std::regex_replace(to_wstring(std::system_error(ec).what()), std::basic_regex<CharType>(STR("(\t|\r?\n)")), STR(" "));
         // right trim
         result.erase(std::ranges::find_if(std::ranges::reverse_view(result), [](const CharType c) -> bool {
             return !std::isspace<CharType>(c, std::locale::classic());
         }).base(), result.end());
 
-        return ensure_str(result);
+        return result;
     }
 }

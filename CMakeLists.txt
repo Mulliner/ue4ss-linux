@@ -7,7 +7,14 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-enable_language(CXX ASM_MASM)
+# Enable position-independent code for all targets (needed for static libs linked into shared libs on Linux)
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
+if(WIN32)
+    enable_language(CXX ASM_MASM)
+else()
+    enable_language(CXX ASM)
+endif()
 include(CheckIPOSupported)
 include(GNUInstallDirs)
 

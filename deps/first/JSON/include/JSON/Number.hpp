@@ -9,7 +9,7 @@ namespace RC::JSON
     class RC_JSON_API Number : public Value
     {
       public:
-        constexpr static Type static_type = JSON::Type::Number;
+        constexpr static JSON::Type static_type = JSON::Type::Number;
 
       public:
         enum class Type
@@ -38,6 +38,9 @@ namespace RC::JSON
         explicit Number(int32_t value);
         explicit Number(float value);
         explicit Number(double value);
+#ifndef _WIN32
+        explicit Number(long long value) : Number(static_cast<int64_t>(value)) {}
+#endif
         ~Number() override = default;
 
       private:

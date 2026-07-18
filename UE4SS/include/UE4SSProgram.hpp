@@ -10,9 +10,13 @@
 #include <Common.hpp>
 #include <CrashDumper.hpp>
 #include <DynamicOutput/DynamicOutput.hpp>
+#ifdef HAS_GUI
 #include <GUI/GUI.hpp>
 #include <GUI/GUITab.hpp>
+#endif
+#ifdef HAS_INPUT
 #include <Input/Handler.hpp>
+#endif
 #include <LuaLibrary.hpp>
 #include <MProgram.hpp>
 #include <Mod/CppMod.hpp>
@@ -25,6 +29,7 @@
 #include <String/StringType.hpp>
 
 // Used to set up ImGui context and allocator in DLL mods
+#ifdef HAS_GUI
 #define UE4SS_ENABLE_IMGUI()                                                                                                                                   \
     /* Wait for UE4SS to create the imgui context. */                                                                                                          \
     /* Without this, we're setting the context to nullptr and eventually crashing when we use any imgui functions. */                                          \
@@ -40,6 +45,9 @@
         UE4SSProgram::get_current_imgui_allocator_functions(&alloc_func, &free_func, &user_data);                                                              \
         ImGui::SetAllocatorFunctions(alloc_func, free_func, user_data);                                                                                        \
     }
+#else
+#define UE4SS_ENABLE_IMGUI()
+#endif
 
 namespace RC
 {
@@ -107,7 +115,9 @@ namespace RC
         std::jthread m_event_loop;
 
       public:
+#ifdef HAS_GUI
         std::jthread m_render_thread;
+#endif
 
       private:
         CrashDumper m_crash_dumper{};
@@ -126,8 +136,12 @@ namespace RC
         std::filesystem::path m_settings_path_and_file;
         std::filesystem::path m_legacy_root_directory;
         Output::DebugConsoleDevice* m_debug_console_device{};
+#ifdef HAS_GUI
         Output::ConsoleDevice* m_console_device{};
+#endif
+#ifdef HAS_GUI
         GUI::DebuggingGUI m_debugging_gui{};
+#endif
 
         using EventCallable = std::function<void()>;
         // Legacy types for backward compatibility with C++ mods
@@ -139,10 +153,13 @@ namespace RC
         };
         std::vector<EventCallable> m_queued_events{};
         std::mutex m_event_queue_mutex{};
+#ifdef HAS_GUI
         std::mutex m_render_thread_mutex{};
+#endif
         std::thread::id m_event_loop_thread_id{};
 
       private:
+#ifdef _WIN32
         std::unique_ptr<PLH::IatHook> m_load_library_a_hook;
         uint64_t m_hook_trampoline_load_library_a;
 
@@ -154,6 +171,7 @@ namespace RC
 
         std::unique_ptr<PLH::IatHook> m_load_library_ex_w_hook;
         uint64_t m_hook_trampoline_load_library_ex_w;
+#endif
 
       public:
         std::vector<std::unique_ptr<Mod>> m_mods;
@@ -215,7 +233,9 @@ namespace RC
         auto start_lua_mods() -> void;
         auto uninstall_mods() -> void;
         auto fire_unreal_init_for_cpp_mods() -> void;
+#ifdef HAS_GUI
         auto fire_ui_init_for_cpp_mods() -> void;
+#endif
         auto fire_program_start_for_cpp_mods() -> void;
         auto fire_dll_load_for_cpp_mods(StringViewType dll_name) -> void;
         auto fire_on_cpp_mods_loaded_for_cpp_mods() -> void;
@@ -250,6 +270,7 @@ namespace RC
         RC_UE4SS_API auto generate_uht_compatible_headers() -> void;
         RC_UE4SS_API auto generate_cxx_headers(const std::filesystem::path& output_dir) -> void;
         RC_UE4SS_API auto generate_lua_types(const std::filesystem::path& output_dir) -> void;
+#ifdef HAS_GUI
         auto get_debugging_ui() -> GUI::DebuggingGUI&
         {
             return m_debugging_gui;
@@ -265,6 +286,9 @@ namespace RC
         {
             return ImGui::GetAllocatorFunctions(alloc_func, free_func, user_data);
         }
+#else
+        auto stop_render_thread() -> void {}
+#endif
         RC_UE4SS_API auto queue_event(EventCallable callable) -> void;
         // Legacy overload for backward compatibility with C++ mods
         RC_UE4SS_API auto queue_event(LegacyEventCallable callable, void* data) -> void;
@@ -321,39 +345,30 @@ namespace RC
         RC_UE4SS_API static auto dump_all_objects_and_properties(const File::StringType& output_path_and_file_name) -> void;
 
         template <typename T>
-        static auto find_mod_by_name(StringViewType mod_name, IsInstalled = IsInstalled::No, IsStarted = IsStarted::No) -> T*
+        static auto find_mod_by_name(StringViewType mod_name, IsInstalled is_installed = IsInstalled::No, IsStarted is_started = IsStarted::No) -> T*
         {
-            std::abort();
+            if constexpr (std::is_same_v<T, LuaMod>)
+            {
+                return static_cast<LuaMod*>(find_mod_by_name_internal(mod_name, is_installed, is_started, [](auto elem) -> bool {
+                    return dynamic_cast<LuaMod*>(elem);
+                }));
+            }
+            else if constexpr (std::is_same_v<T, CppMod>)
+            {
+                return static_cast<CppMod*>(find_mod_by_name_internal(mod_name, is_installed, is_started, [](auto elem) -> bool {
+                    return dynamic_cast<CppMod*>(elem);
+                }));
+            }
+            else
+            {
+                std::abort();
+            }
         };
         template <typename T>
-        static auto find_mod_by_name(std::string_view mod_name, IsInstalled = IsInstalled::No, IsStarted = IsStarted::No) -> T*
+        static auto find_mod_by_name(std::string_view mod_name, IsInstalled is_installed = IsInstalled::No, IsStarted is_started = IsStarted::No) -> T*
         {
-            std::abort();
+            return find_mod_by_name<T>(ensure_str(mod_name), is_installed, is_started);
         };
-        template <>
-        RC_UE4SS_API auto find_mod_by_name<LuaMod>(StringViewType mod_name, IsInstalled is_installed, IsStarted is_started) -> LuaMod*
-        {
-            return static_cast<LuaMod*>(find_mod_by_name_internal(mod_name, is_installed, is_started, [](auto elem) -> bool {
-                return dynamic_cast<LuaMod*>(elem);
-            }));
-        }
-        template <>
-        RC_UE4SS_API auto find_mod_by_name<CppMod>(StringViewType mod_name, IsInstalled is_installed, IsStarted is_started) -> CppMod*
-        {
-            return static_cast<CppMod*>(find_mod_by_name_internal(mod_name, is_installed, is_started, [](auto elem) -> bool {
-                return dynamic_cast<CppMod*>(elem);
-            }));
-        }
-        template <>
-        RC_UE4SS_API auto find_mod_by_name<LuaMod>(std::string_view mod_name, IsInstalled is_installed, IsStarted is_started) -> LuaMod*
-        {
-            return find_mod_by_name<LuaMod>(ensure_str(mod_name), is_installed, is_started);
-        }
-        template <>
-        RC_UE4SS_API auto find_mod_by_name<CppMod>(std::string_view mod_name, IsInstalled is_installed, IsStarted is_started) -> CppMod*
-        {
-            return find_mod_by_name<CppMod>(ensure_str(mod_name), is_installed, is_started);
-        }
 
         RC_UE4SS_API static auto find_lua_mod_by_name(StringViewType mod_name, IsInstalled = IsInstalled::No, IsStarted = IsStarted::No) -> LuaMod*;
         RC_UE4SS_API static auto find_lua_mod_by_name(std::string_view mod_name, IsInstalled = IsInstalled::No, IsStarted = IsStarted::No) -> LuaMod*;

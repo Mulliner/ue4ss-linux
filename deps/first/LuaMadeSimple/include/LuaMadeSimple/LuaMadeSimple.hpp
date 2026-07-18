@@ -2,7 +2,9 @@
 
 #include <format>
 #include <functional>
+#include <memory>
 #include <optional>
+#include <type_traits>
 
 #include <LuaMadeSimple/Common.hpp>
 #include <lua.hpp>
@@ -272,7 +274,7 @@ namespace RC::LuaMadeSimple
                 {
                     lua_pushboolean(get_lua_instance().get_lua_state(), value);
                 }
-                else if constexpr (std::is_same_v<ValueType, int> || std::is_same_v<ValueType, long long>)
+                else if constexpr (std::is_same_v<ValueType, int> || std::is_same_v<ValueType, long long> || std::is_same_v<ValueType, long>)
                 {
                     lua_pushinteger(get_lua_instance().get_lua_state(), value);
                 }
@@ -292,11 +294,11 @@ namespace RC::LuaMadeSimple
                 {
                     add_function_value_internal(value);
                 }
-                else if constexpr (std::is_same_v<ValueType, Userdata<typename ValueType::InnerType>>)
+                else if constexpr (requires { typename ValueType::InnerType; } && std::is_same_v<ValueType, Userdata<typename ValueType::InnerType>>)
                 {
                     get_lua_instance().transfer_stack_object<typename ValueType::InnerType>(std::move(value.inner_object), std::nullopt, value.table_metamethods);
                 }
-                else if constexpr (std::is_same_v<ValueType, SharedUserdata<typename ValueType::InnerType>>)
+                else if constexpr (requires { typename ValueType::InnerType; } && std::is_same_v<ValueType, SharedUserdata<typename ValueType::InnerType>>)
                 {
                     get_lua_instance().share_heap_object(value.inner_object, value.table_metamethods);
                 }

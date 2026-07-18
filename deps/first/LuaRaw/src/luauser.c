@@ -1,3 +1,4 @@
+#ifdef _WIN32
 #include <windows.h>
 #include "lua.h"
 
@@ -38,3 +39,41 @@ void LuaUnlock(lua_State* L)
     /* Release control of mutex */
     LeaveCriticalSection(&Gl.LockSct);
 }
+#else
+#include <pthread.h>
+#include "lua.h"
+
+static struct {
+    pthread_mutex_t LockSct;
+    int Init;
+} Gl;
+
+void LuaLockInitial(lua_State* L)
+{
+    if (!Gl.Init)
+    {
+        pthread_mutex_init(&Gl.LockSct, NULL);
+        Gl.Init = 1;
+    }
+}
+
+void LuaLockFinal(lua_State* L)
+{
+    if (Gl.Init)
+    {
+        pthread_mutex_destroy(&Gl.LockSct);
+        Gl.Init = 0;
+    }
+}
+
+void LuaLock(lua_State* L)
+{
+    LuaLockInitial(L);
+    pthread_mutex_lock(&Gl.LockSct);
+}
+
+void LuaUnlock(lua_State* L)
+{
+    pthread_mutex_unlock(&Gl.LockSct);
+}
+#endif

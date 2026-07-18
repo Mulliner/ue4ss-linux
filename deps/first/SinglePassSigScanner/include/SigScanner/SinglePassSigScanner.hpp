@@ -11,10 +11,27 @@
 #define LO_NIBBLE(b) ((b) & 0x0F)
 
 // Windows.h forward declarations
+#ifdef _WIN32
 struct _SYSTEM_INFO;
 typedef _SYSTEM_INFO SYSTEM_INFO;
 struct _MODULEINFO;
 typedef _MODULEINFO MODULEINFO;
+#else
+// Linux equivalents
+struct SYSTEM_INFO
+{
+    void* lpMinimumApplicationAddress{};
+    void* lpMaximumApplicationAddress{};
+    unsigned long dwPageSize{};
+    unsigned long dwAllocationGranularity{};
+};
+struct MODULEINFO
+{
+    void* lpBaseOfDll{};
+    unsigned long SizeOfImage{};
+    void* EntryPoint{};
+};
+#endif
 
 namespace RC
 {

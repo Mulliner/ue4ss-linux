@@ -49,7 +49,8 @@ namespace RC
             // The default message will be used which can't be too small since it's calculated at compile-time
             if (msg_len < sizeof(m_message))
             {
-                strncpy_s(m_message, message, msg_len);
+                strncpy(m_message, message, msg_len);
+                m_message[msg_len] = '\0';
             }
         }
 

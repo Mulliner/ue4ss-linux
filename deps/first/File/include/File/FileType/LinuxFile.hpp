@@ -9,9 +9,7 @@
 #include <File/FileType/FileBase.hpp>
 #include <File/Macros.hpp>
 
-// NOTE: This file is effectively a stub.
-//       The LinuxFile class has not been implemented!
-//       File operations through the Output::* system doesn't work, for example FileDevice and NewFileDevice.
+// Linux implementation of file operations using POSIX APIs.
 
 namespace RC::File
 {

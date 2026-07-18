@@ -1,11 +1,3 @@
-/*
-
-    NOTE THAT THIS FILE IS OUTDATED!!! IT HASN'T BEEN UPDATED TO MATCH THE BEHAVIOR OF THE Windows VERSION!
-    THIS FILE PROBABLY DOESN'T EVEN COMPILE IN ITS CURRENT STATE!
-
-
-*/
-
 #include <bit>
 #include <iostream>
 #include <cstdint>
@@ -13,6 +5,10 @@
 #include <sys/inotify.h>
 #include <sys/poll.h>
 #include <unistd.h>
+
+#include <DynamicOutput/DynamicOutput.hpp>
+#include <FilesystemWatcher.hpp>
+#include <Helpers/String.hpp>
 
 namespace RC
 {
@@ -23,37 +19,29 @@ namespace RC
 
     auto init_filesystem_watcher(FilesystemWatcher& watcher, const std::filesystem::path& path) -> void
     {
-        watcher.m_path = path;
+        watcher.m_paths.push_back(path);
         auto handle = inotify_init1(IN_NONBLOCK);
         watcher.m_handle = reinterpret_cast<void*>(handle);
         auto file_descriptor = handle;
         if (file_descriptor == -1)
         {
-            Output::send<LogLevel::Error>(STR("Error watching '{}': {}"), path.string(), std::strerror(errno));
+            Output::send<LogLevel::Error>(STR("Error watching '{}': {}"), ensure_str(path.string()), ensure_str(std::strerror(errno)));
             return;
         }
         if (inotify_add_watch(file_descriptor, path.c_str(), IN_CREATE) == -1)
         {
-            Output::send<LogLevel::Error>(STR("Error watching '{}': {}"), path.string(), std::strerror(errno));
+            Output::send<LogLevel::Error>(STR("Error watching '{}': {}"), ensure_str(path.string()), ensure_str(std::strerror(errno)));
             return;
         }
-    }
-
-    FilesystemWatcher::FilesystemWatcher(const std::filesystem::path& path)
-    {
-        init_filesystem_watcher(*this, path);
-    }
-
-    FilesystemWatcher::FilesystemWatcher(const std::filesystem::path& path, std::chrono::milliseconds min_duration_between_notifications)
-        : m_min_duration_between_notifications{min_duration_between_notifications}
-    {
-        init_filesystem_watcher(*this, path);
     }
 
     FilesystemWatcher::~FilesystemWatcher()
     {
         m_stop_source.request_stop();
-        m_polling_thread.join();
+        if (m_polling_thread.joinable())
+        {
+            m_polling_thread.join();
+        }
         if (m_handle)
         {
             close(handle_to_fd(m_handle));
@@ -83,7 +71,7 @@ namespace RC
                 }
                 else
                 {
-                    Output::send<LogLevel::Error>(STR("Error: {}"), std::strerror(errno));
+                    Output::send<LogLevel::Error>(STR("Error: {}"), ensure_str(std::strerror(errno)));
                     std::exit(EXIT_FAILURE);
                 }
             }
@@ -106,7 +94,7 @@ namespace RC
                         auto length = read(handle_to_fd(m_handle), buffer, sizeof(buffer));
                         if (length == -1 && errno != EAGAIN)
                         {
-                            Output::send<LogLevel::Error>(STR("Error: {}"), std::strerror(errno));
+                            Output::send<LogLevel::Error>(STR("Error: {}"), ensure_str(std::strerror(errno)));
                             std::exit(EXIT_FAILURE);
                         }
                         else if (length <= 0)
@@ -138,7 +126,7 @@ namespace RC
                                             continue;
                                         }
                                         m_last_notification = now;
-                                        watch.notify(std::filesystem::path{});
+                                        watch.notify(name, false);
                                     }
                                 }
                             }

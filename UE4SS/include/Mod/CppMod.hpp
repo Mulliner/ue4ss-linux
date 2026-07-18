@@ -2,7 +2,12 @@
 
 #include <vector>
 
+#ifdef _WIN32
 #include <Unreal/Core/Windows/MinimalWindowsApi.hpp>
+#else
+// On Linux, HMODULE is just void*
+using HMODULE = void*;
+#endif
 
 #include <Mod/CppUserModBase.hpp>
 #include <Mod/Mod.hpp>
@@ -26,8 +31,12 @@ namespace RC
         StringType m_dll_filename{};
         std::filesystem::path m_dlls_path;
 
+#ifdef _WIN32
         Unreal::Windows::HMODULE m_main_dll_module = NULL;
-        void* m_dlls_path_cookie = NULL;
+#else
+        void* m_main_dll_module = nullptr;
+#endif
+        void* m_dlls_path_cookie = nullptr;
         start_type m_start_mod_func = nullptr;
         uninstall_type m_uninstall_mod_func = nullptr;
 

@@ -1,4 +1,5 @@
 #include <format>
+#include <cstdio>
 
 #include <DynamicOutput/DynamicOutput.hpp>
 #include <Helpers/Casting.hpp>
@@ -9,7 +10,9 @@
 #include <Unreal/FOutputDevice.hpp>
 #include <Unreal/UnrealInitializer.hpp>
 
+#ifdef _WIN32
 #include <Windows.h>
+#endif
 
 namespace RC::LuaLibrary
 {
@@ -102,7 +105,7 @@ namespace RC::LuaLibrary
 
         if (output_device)
         {
-            output_device->Log(FromCharTypePtr<TCHAR>(outdevice_string.c_str()));
+            output_device->Log(FromCharTypePtr<Unreal::TCHAR>(outdevice_string.c_str()));
         }
 
         return 0;
@@ -118,7 +121,13 @@ namespace RC::LuaLibrary
         }
 
         int32_t* int32_ptr = reinterpret_cast<int32_t*>(lua.get_integer());
-        int32_t int32_val = Helper::Casting::offset_deref_safe<int32_t>(int32_ptr, 0, GetCurrentProcess());
+        int32_t int32_val = Helper::Casting::offset_deref_safe<int32_t>(int32_ptr, 0,
+#ifdef _WIN32
+            GetCurrentProcess()
+#else
+            nullptr
+#endif
+        );
 
         if (int32_val == 0)
         {
@@ -156,7 +165,7 @@ namespace RC::LuaLibrary
         }
         else
         {
-            printf_s("Internal Error: %s\n", e.data());
+            std::printf("Internal Error: %s\n", e.data());
         }
     }
 

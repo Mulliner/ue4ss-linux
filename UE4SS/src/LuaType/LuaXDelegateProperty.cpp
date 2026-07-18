@@ -1,6 +1,7 @@
 #include <LuaType/LuaFName.hpp>
 #include <LuaType/LuaUObject.hpp>
 #include <LuaType/LuaXDelegateProperty.hpp>
+#include <Helpers/String.hpp>
 #pragma warning(disable : 4005)
 #include <Unreal/CoreUObject/UObject/UnrealType.hpp>
 #include <Unreal/CoreUObject/UObject/Class.hpp>
@@ -165,7 +166,7 @@ namespace RC::LuaType
                            Unreal::FName fname;
                            if (lua.is_string(1))
                            {
-                               fname = Unreal::FName(to_wstring(lua.get_string(1)), Unreal::FNAME_Add);
+                               fname = Unreal::FName(ensure_str(lua.get_string(1)), Unreal::FNAME_Add);
                            }
                            else
                            {
@@ -196,7 +197,7 @@ namespace RC::LuaType
                            Unreal::FName fname;
                            if (lua.is_string(1))
                            {
-                               fname = Unreal::FName(to_wstring(lua.get_string(1)), Unreal::FNAME_Add);
+                               fname = Unreal::FName(ensure_str(lua.get_string(1)), Unreal::FNAME_Add);
                            }
                            else
                            {
@@ -440,7 +441,7 @@ namespace RC::LuaType
                            Unreal::FName fname;
                            if (lua.is_string(1))
                            {
-                               fname = Unreal::FName(to_wstring(lua.get_string(1)), Unreal::FNAME_Add);
+                               fname = Unreal::FName(ensure_str(lua.get_string(1)), Unreal::FNAME_Add);
                            }
                            else
                            {
@@ -471,7 +472,7 @@ namespace RC::LuaType
                            Unreal::FName fname;
                            if (lua.is_string(1))
                            {
-                               fname = Unreal::FName(to_wstring(lua.get_string(1)), Unreal::FNAME_Add);
+                               fname = Unreal::FName(ensure_str(lua.get_string(1)), Unreal::FNAME_Add);
                            }
                            else
                            {

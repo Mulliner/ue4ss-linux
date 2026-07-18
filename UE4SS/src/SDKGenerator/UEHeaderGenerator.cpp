@@ -1,7 +1,12 @@
+#ifdef _WIN32
 #define NOMINMAX
 #include <Windows.h>
 #ifdef TEXT
 #undef TEXT
+#endif
+#else
+#include <unistd.h>
+#include <cstdio>
 #endif
 
 #include <algorithm>
@@ -805,7 +810,7 @@ namespace RC::UEGenerator
         m_class_subobjects.clear();
 
         // Sort the attachments alphabetically by the property name
-        std::vector<std::pair<FProperty*, std::tuple<std::wstring, std::wstring, bool>>> sorted_attachments(implementation_file.attachments.begin(),
+        std::vector<std::pair<FProperty*, std::tuple<StringType, StringType, bool>>> sorted_attachments(implementation_file.attachments.begin(),
                                                                                                             implementation_file.attachments.end());
         std::sort(sorted_attachments.begin(), sorted_attachments.end(), [](const auto& a, const auto& b) {
             return a.first->GetName() < b.first->GetName();
@@ -4168,9 +4173,20 @@ namespace RC::UEGenerator
 
     auto UEHeaderGenerator::determine_primary_game_module_name() -> StringType
     {
+#ifdef _WIN32
         HMODULE primary_executable_module = GetModuleHandleW(NULL);
         CharType module_name_buffer[1024]{'\0'};
         GetModuleFileNameW(primary_executable_module, FromCharTypePtr<wchar_t>(module_name_buffer), ARRAYSIZE(module_name_buffer));
+#else
+        char exe_path_buffer[1024]{'\0'};
+        ssize_t len = readlink("/proc/self/exe", exe_path_buffer, sizeof(exe_path_buffer) - 1);
+        if (len > 0) exe_path_buffer[len] = '\0';
+        CharType module_name_buffer[1024]{'\0'};
+        // Convert UTF-8 path to CharType (char16_t on Linux)
+        std::string utf8_path(exe_path_buffer);
+        std::u16string u16_path = std::u16string(utf8_path.begin(), utf8_path.end());
+        std::copy(u16_path.begin(), u16_path.end(), module_name_buffer);
+#endif
 
         // Retrieve the filename from the full path, strip down the extension
         FFilePath root_executable_path((StringType(module_name_buffer)));
@@ -4182,6 +4198,14 @@ namespace RC::UEGenerator
         {
             filename.erase(filename.length() - shipping_postfix.length());
         }
+#ifdef __linux__
+        // Also strip Linux shipping postfix
+        StringType linux_shipping_postfix = STR("-Linux-Shipping");
+        if (filename.ends_with(linux_shipping_postfix))
+        {
+            filename.erase(filename.length() - linux_shipping_postfix.length());
+        }
+#endif
         return filename;
     }
 

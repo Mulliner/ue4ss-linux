@@ -11,12 +11,13 @@ include(Utilities)  # For string manipulation functions
 set(UE4SS_PROJECTS "UE4SS" "UVTD" CACHE STRING "List of main project targets")
 set(UE4SS_TARGET_TYPES "Game" "CasePreserving" "LessEqual421" CACHE STRING "UE4-style target types")
 set(UE4SS_CONFIGURATION_TYPES "Debug" "Dev" "Shipping" "Test" CACHE STRING "UE4-style configuration types")
-set(UE4SS_PLATFORM_TYPES "Win64" CACHE STRING "Supported platform types")
+set(UE4SS_PLATFORM_TYPES "Win64" "Linux64" CACHE STRING "Supported platform types")
 
 # Feature toggles
 option(MAKE_DEPENDENCIES_SHARED "Make dependencies shared" OFF)
 option(UE4SS_CONSOLE_COLORS_ENABLED "Enable console colors" OFF)
 option(UE4SS_INPUT_ENABLED "Enable the input system" ON)
+option(UE4SS_GUI_ENABLED "Enable the GUI system" ON)
 option(ENABLE_IDE_SOURCE_VISIBILITY "Enable IDE visibility for source files" ON)
 option(UE4SS_SUPPRESS_THIRD_PARTY_WARNINGS "Suppress warnings from third-party libraries" ON)
 option(UE4SS_VERSION_CHECK "Enable compiler version checking" ON)
@@ -55,6 +56,8 @@ set(UE4SS_Test_DEFINITIONS UE_BUILD_TEST STATS UE4SS_PROFILERS)
 # Platform definitions (UE4-style)
 set(UE4SS_Win64_DEFINITIONS PLATFORM_WINDOWS PLATFORM_MICROSOFT OVERRIDE_PLATFORM_HEADER_NAME=Windows UBT_COMPILED_PLATFORM=Win64)
 set(UE4SS_Win64_VARS CMAKE_SYSTEM_PROCESSOR=x86_64)
+set(UE4SS_Linux64_DEFINITIONS PLATFORM_LINUX OSTYPE=Linux UBT_COMPILED_PLATFORM=Linux)
+set(UE4SS_Linux64_VARS CMAKE_SYSTEM_PROCESSOR=x86_64)
 
 # Initializes the project configuration
 #
@@ -78,6 +81,10 @@ function(ue4ss_initialize_project)
     
     if(UE4SS_INPUT_ENABLED)
         list(APPEND TARGET_COMPILE_DEFINITIONS HAS_INPUT)
+    endif()
+    
+    if(UE4SS_GUI_ENABLED)
+        list(APPEND TARGET_COMPILE_DEFINITIONS HAS_GUI)
     endif()
     
     # Unicode support

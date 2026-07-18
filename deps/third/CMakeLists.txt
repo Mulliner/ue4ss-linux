@@ -17,37 +17,40 @@ FetchContent_MakeAvailable(glaze)
 # Uses suppress_third_party_warnings() from cmake/modules/ThirdPartyWarnings.cmake
 suppress_third_party_warnings(glaze)
 
-# GLFW
-add_subdirectory("GLFW")
+# GUI-related dependencies (Windows-only for now, Linux uses headless mode)
+if(WIN32)
+    # GLFW
+    add_subdirectory("GLFW")
 
-# glad (OpenGL loader)
-add_subdirectory("glad")
+    # glad (OpenGL loader)
+    add_subdirectory("glad")
 
-# ImGui and related libraries
-FetchContent_Declare(
-    ImGui
-    GIT_REPOSITORY https://github.com/ocornut/imgui.git
-    GIT_TAG v1.92.1
-    GIT_SHALLOW TRUE
-    GIT_PROGRESS ON
-)
+    # ImGui and related libraries
+    FetchContent_Declare(
+        ImGui
+        GIT_REPOSITORY https://github.com/ocornut/imgui.git
+        GIT_TAG v1.92.1
+        GIT_SHALLOW TRUE
+        GIT_PROGRESS ON
+    )
     
-FetchContent_Declare(
-    ImGuiTextEdit
-    GIT_REPOSITORY https://github.com/UE4SS-RE/ImGuiColorTextEdit.git
-    GIT_TAG v1.2.0
-    GIT_SHALLOW TRUE
-    GIT_PROGRESS ON
-)
+    FetchContent_Declare(
+        ImGuiTextEdit
+        GIT_REPOSITORY https://github.com/UE4SS-RE/ImGuiColorTextEdit.git
+        GIT_TAG v1.2.0
+        GIT_SHALLOW TRUE
+        GIT_PROGRESS ON
+    )
     
-FetchContent_Declare(
-    IconFontCppHeaders
-    GIT_REPOSITORY https://github.com/juliettef/IconFontCppHeaders.git
-    GIT_TAG main
-    GIT_SHALLOW TRUE
-    GIT_PROGRESS ON
-)
-add_subdirectory("imgui")
+    FetchContent_Declare(
+        IconFontCppHeaders
+        GIT_REPOSITORY https://github.com/juliettef/IconFontCppHeaders.git
+        GIT_TAG main
+        GIT_SHALLOW TRUE
+        GIT_PROGRESS ON
+    )
+    add_subdirectory("imgui")
+endif()
 
 # Zydis
 FetchContent_Declare(
@@ -59,23 +62,25 @@ FetchContent_Declare(
 )
 add_subdirectory("zydis")
 
-# PolyHook
-FetchContent_Declare(
-    PolyHook2
-    GIT_REPOSITORY https://github.com/stevemk14ebr/PolyHook_2_0.git
-    GIT_TAG 298d56210b9d9e66cde8f96481d6053925c6ae15
-    GIT_PROGRESS ON
-)
-add_subdirectory("PolyHook_2_0")
+# PolyHook (Windows-only)
+if(WIN32)
+    FetchContent_Declare(
+        PolyHook2
+        GIT_REPOSITORY https://github.com/stevemk14ebr/PolyHook_2_0.git
+        GIT_TAG 298d56210b9d9e66cde8f96481d6053925c6ae15
+        GIT_PROGRESS ON
+    )
+    add_subdirectory("PolyHook_2_0")
 
-# raw_pdb
-FetchContent_Declare(
-    raw_pdb
-    GIT_REPOSITORY https://github.com/MolecularMatters/raw_pdb.git
-    GIT_TAG 8c6a7146393c83d27fa101e8bc8017f2a7f151df
-    GIT_PROGRESS ON
-)
-add_subdirectory("raw_pdb")
+    # raw_pdb (Windows-only)
+    FetchContent_Declare(
+        raw_pdb
+        GIT_REPOSITORY https://github.com/MolecularMatters/raw_pdb.git
+        GIT_TAG 8c6a7146393c83d27fa101e8bc8017f2a7f151df
+        GIT_PROGRESS ON
+    )
+    add_subdirectory("raw_pdb")
+endif()
 
 # Corrosion (Rust integration)
 FetchContent_Declare(

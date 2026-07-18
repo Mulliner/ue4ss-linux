@@ -3,13 +3,24 @@
 #include <format>
 #include <bit>
 #include <UE4SSProgram.hpp>
-#include <Unreal/Core/Windows/WindowsHWrapper.hpp>
 
+#ifdef _WIN32
+#include <Unreal/Core/Windows/WindowsHWrapper.hpp>
 #include <polyhook2/PE/IatHook.hpp>
 #include <dbghelp.h>
+#endif
+
 #include <Helpers/SysError.hpp>
 #include <Helpers/Time.hpp>
 #include <String/StringType.hpp>
+
+#ifdef __linux__
+#include <signal.h>
+#include <execinfo.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <cstring>
+#endif
 
 namespace fs = std::filesystem;
 
@@ -19,6 +30,7 @@ using std::chrono::time_point_cast;
 
 namespace RC
 {
+#ifdef _WIN32
     const int DumpType =
             MiniDumpNormal | MiniDumpWithThreadInfo | MiniDumpWithIndirectlyReferencedMemory | MiniDumpWithModuleHeaders | MiniDumpWithAvxXStateContext;
 
@@ -70,6 +82,60 @@ namespace RC
     {
         return nullptr;
     }
+#endif // _WIN32
+
+#ifdef __linux__
+    static bool FullMemoryDump = false;
+
+    static auto linux_crash_handler(int sig) -> void
+    {
+        // Get the working directory
+        StringType working_dir;
+        try
+        {
+            working_dir = StringType{UE4SSProgram::get_program().get_working_directory()};
+        }
+        catch (...)
+        {
+            working_dir = STR(".");
+        }
+
+        auto now_str = get_now_as_string(STR("{:%Y_%m_%d_%H_%M_%S}"));
+        auto crash_path_str = fmt::format(STR("{}/crash_{}.txt"), working_dir, now_str);
+        auto crash_path_utf8 = to_string(crash_path_str);
+
+        int fd = open(crash_path_utf8.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        if (fd >= 0)
+        {
+            const char* header = "=== UE4SS Crash Report ===\n";
+            write(fd, header, strlen(header));
+
+            const char* sig_name = sig == SIGSEGV ? "SIGSEGV" : sig == SIGABRT ? "SIGABRT" : sig == SIGFPE ? "SIGFPE" : sig == SIGILL ? "SIGILL" : "UNKNOWN";
+            char sig_buf[256];
+            int sig_len = snprintf(sig_buf, sizeof(sig_buf), "Signal: %d (%s)\n\n", sig, sig_name);
+            write(fd, sig_buf, sig_len);
+
+            // Backtrace
+            void* bt_buffer[64];
+            int bt_size = backtrace(bt_buffer, 64);
+            const char* bt_header = "\nBacktrace:\n";
+            write(fd, bt_header, strlen(bt_header));
+            backtrace_symbols_fd(bt_buffer, bt_size, fd);
+
+            close(fd);
+
+            fprintf(stderr, "UE4SS: Crash report written to: %s\n", crash_path_utf8.c_str());
+        }
+        else
+        {
+            fprintf(stderr, "UE4SS: Failed to write crash report\n");
+        }
+
+        // Re-raise the signal to get default behavior (core dump etc)
+        signal(sig, SIG_DFL);
+        raise(sig);
+    }
+#endif // __linux__
 
     CrashDumper::CrashDumper()
     {
@@ -77,12 +143,15 @@ namespace RC
 
     CrashDumper::~CrashDumper()
     {
+#ifdef _WIN32
         m_set_unhandled_exception_filter_hook->unHook();
         SetUnhandledExceptionFilter(reinterpret_cast<LPTOP_LEVEL_EXCEPTION_FILTER>(m_previous_exception_filter));
+#endif
     }
 
     void CrashDumper::enable()
     {
+#ifdef _WIN32
         SetErrorMode(SEM_FAILCRITICALERRORS);
         m_previous_exception_filter = SetUnhandledExceptionFilter(ExceptionHandler);
 
@@ -92,6 +161,17 @@ namespace RC
                                                                                &m_hook_trampoline_set_unhandled_exception_filter_hook,
                                                                                L"");
         m_set_unhandled_exception_filter_hook->hook();
+#else
+        struct sigaction sa{};
+        sa.sa_handler = linux_crash_handler;
+        sigemptyset(&sa.sa_mask);
+        sa.sa_flags = SA_RESTART;
+
+        sigaction(SIGSEGV, &sa, nullptr);
+        sigaction(SIGABRT, &sa, nullptr);
+        sigaction(SIGFPE, &sa, nullptr);
+        sigaction(SIGILL, &sa, nullptr);
+#endif
         this->enabled = true;
     }
 

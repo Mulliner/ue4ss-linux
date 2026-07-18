@@ -3,7 +3,11 @@
 #ifndef RC_JSON_EXPORTS
 #ifndef RC_JSON_BUILD_STATIC
 #ifndef RC_JSON_API
+#ifdef _WIN32
 #define RC_JSON_API __declspec(dllimport)
+#else
+#define RC_JSON_API
+#endif
 #endif
 #else
 #ifndef RC_JSON_API
@@ -12,7 +16,11 @@
 #endif
 #else
 #ifndef RC_JSON_API
+#ifdef _WIN32
 #define RC_JSON_API __declspec(dllexport)
+#else
+#define RC_JSON_API __attribute__((visibility("default")))
+#endif
 #endif
 #endif
 

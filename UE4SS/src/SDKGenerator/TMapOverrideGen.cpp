@@ -66,7 +66,7 @@ namespace RC::UEGenerator
                         {
                             continue;
                         }
-                        Output::send(STR("Found Relevant TMap Property: {} in Class: {}\n"), to_wstring(property_name), object->GetName());
+                        Output::send(STR("Found Relevant TMap Property: {} in Class: {}\n"), ensure_str(property_name), object->GetName());
 
                         auto& fm_json_object = fm_object[property_name] = glz::generic::object_t{};
                         glz::generic::array_t uaapi_arr{};

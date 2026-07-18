@@ -5,14 +5,24 @@ project(${TARGET})
 
 option(UE4SS_${TARGET}_BUILD_SHARED "Build as a shared lib" OFF)
 
-set(${TARGET}_Sources
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/Handler.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/KeyDef.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/PlatformInit.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/Platform/GLFW3InputSource.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/Platform/QueueInputSource.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/Platform/Win32AsyncInputSource.cpp"
-        )
+if(UE4SS_INPUT_ENABLED)
+    set(${TARGET}_Sources
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/Handler.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/KeyDef.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/PlatformInit.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/Platform/QueueInputSource.cpp"
+            )
+    if(WIN32)
+        list(APPEND ${TARGET}_Sources "${CMAKE_CURRENT_SOURCE_DIR}/src/Platform/Win32AsyncInputSource.cpp")
+    endif()
+    if(UE4SS_GUI_ENABLED)
+        list(APPEND ${TARGET}_Sources "${CMAKE_CURRENT_SOURCE_DIR}/src/Platform/GLFW3InputSource.cpp")
+    endif()
+else()
+    set(${TARGET}_Sources
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/KeyDef.cpp"
+            )
+endif()
 
 string(REGEX REPLACE "(.)([A-Z])" "\\1_\\2" MODULE_NAME ${TARGET})
 string(TOUPPER ${MODULE_NAME} MODULE_NAME)

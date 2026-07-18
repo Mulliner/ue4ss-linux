@@ -54,7 +54,14 @@ public:
 
     FORCEINLINE void Seek(int Pos, int Origin = SEEK_CUR) override
     {
-        m_Stream.seekp(Pos, Origin);
+        std::ios_base::seekdir dir;
+        switch (Origin)
+        {
+        case SEEK_SET: dir = std::ios_base::beg; break;
+        case SEEK_END: dir = std::ios_base::end; break;
+        default: dir = std::ios_base::cur; break;
+        }
+        m_Stream.seekp(Pos, dir);
     }
 
     uint32_t Size() override
@@ -82,10 +89,10 @@ public:
 
     FileWriter(const char* FileName)
     {
-        auto fopen_r = fopen_s(&m_File, FileName, "wb");
-        if (fopen_r != 0)
+        m_File = fopen(FileName, "wb");
+        if (!m_File)
         {
-            RC::Output::send<RC::LogLevel::Error>(STR("Unable to open file for writing: '{}': {}\n"), RC::ensure_str(FileName), RC::ensure_str(std::strerror(fopen_r)));
+            RC::Output::send<RC::LogLevel::Error>(STR("Unable to open file for writing: '{}': {}\n"), RC::ensure_str(FileName), RC::ensure_str(std::strerror(errno)));
         }
         printf("");
     }

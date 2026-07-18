@@ -79,3 +79,8 @@ vsxmake2022
 
 # xwin
 xwin/*
+
+# Linux build directories
+build_linux/
+build_linux_test/
+build_win_test/

@@ -302,7 +302,7 @@ namespace RC::ObjectDumper
         static auto as_function_class = UObjectGlobals::StaticFindObject<UClass*>(nullptr, nullptr, STR("/Script/AngelscriptCode.ASFunction"));
         if (!as_function_class || !typed_this->IsA(as_function_class))
         {
-            out_line.append(fmt::format(STR(" [f: {:016X}]"), to_address(typed_this->GetFuncPtr())));
+            out_line.append(fmt::format(STR(" [f: {:016X}]"), reinterpret_cast<uintptr_t>(typed_this->GetFuncPtr())));
         }
         out_line.append(STR("\n"));
 

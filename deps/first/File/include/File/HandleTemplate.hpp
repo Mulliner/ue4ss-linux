@@ -109,43 +109,34 @@ namespace RC::File
         template <typename SerializedDataType>
         auto serialize_item(SerializedDataType data) -> void
         {
-            throw std::runtime_error{"not reached"};
-        }
-
-        template <>
-        auto serialize_item(unsigned long data) -> void
-        {
-            m_internal_handle.serialize_item({.data_type = GenericDataType::UnsignedLong, .data_ulong = data}, false);
-        }
-
-        template <>
-        auto serialize_item(signed long data) -> void
-        {
-            m_internal_handle.serialize_item({.data_type = GenericDataType::SignedLong, .data_long = data}, false);
-        }
-
-        template <>
-        auto serialize_item(unsigned long long data) -> void
-        {
-            m_internal_handle.serialize_item({.data_type = GenericDataType::UnsignedLongLong, .data_ulonglong = data}, false);
-        }
-
-        template <>
-        auto serialize_item(signed long long data) -> void
-        {
-            m_internal_handle.serialize_item({.data_type = GenericDataType::SignedLongLong, .data_longlong = data}, false);
-        }
-
-        template <>
-        auto serialize_item(unsigned int data) -> void
-        {
-            serialize_item<unsigned long>(data);
-        }
-
-        template <>
-        auto serialize_item(signed int data) -> void
-        {
-            serialize_item<signed long>(data);
+            if constexpr (std::is_same_v<SerializedDataType, unsigned long>)
+            {
+                m_internal_handle.serialize_item({.data_type = GenericDataType::UnsignedLong, .data_ulong = data}, false);
+            }
+            else if constexpr (std::is_same_v<SerializedDataType, signed long>)
+            {
+                m_internal_handle.serialize_item({.data_type = GenericDataType::SignedLong, .data_long = data}, false);
+            }
+            else if constexpr (std::is_same_v<SerializedDataType, unsigned long long>)
+            {
+                m_internal_handle.serialize_item({.data_type = GenericDataType::UnsignedLongLong, .data_ulonglong = data}, false);
+            }
+            else if constexpr (std::is_same_v<SerializedDataType, signed long long>)
+            {
+                m_internal_handle.serialize_item({.data_type = GenericDataType::SignedLongLong, .data_longlong = data}, false);
+            }
+            else if constexpr (std::is_same_v<SerializedDataType, unsigned int>)
+            {
+                serialize_item<unsigned long>(data);
+            }
+            else if constexpr (std::is_same_v<SerializedDataType, signed int>)
+            {
+                serialize_item<signed long>(data);
+            }
+            else
+            {
+                throw std::runtime_error{"not reached"};
+            }
         }
 
         template <typename SerializedDataType>
