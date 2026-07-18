@@ -1274,10 +1274,18 @@ namespace RC
         // Lua mods will never fire. Call them directly here.
         fprintf(stderr, "[UE4SS] Linux: loading Lua mods directly (no engine tick hook)...\n");
         TRY([&] {
+            fprintf(stderr, "[UE4SS] Linux: calling install_lua_mods()...\n");
             install_lua_mods();
+            fprintf(stderr, "[UE4SS] Linux: install_lua_mods() done.\n");
+            fprintf(stderr, "[UE4SS] Linux: calling LuaMod::on_program_start()...\n");
             LuaMod::on_program_start();
+            fprintf(stderr, "[UE4SS] Linux: LuaMod::on_program_start() done.\n");
+            fprintf(stderr, "[UE4SS] Linux: calling fire_program_start_for_cpp_mods()...\n");
             fire_program_start_for_cpp_mods();
+            fprintf(stderr, "[UE4SS] Linux: fire_program_start_for_cpp_mods() done.\n");
+            fprintf(stderr, "[UE4SS] Linux: calling start_lua_mods()...\n");
             start_lua_mods();
+            fprintf(stderr, "[UE4SS] Linux: start_lua_mods() done.\n");
             fprintf(stderr, "[UE4SS] Linux: Lua mods loaded.\n");
         });
 #endif

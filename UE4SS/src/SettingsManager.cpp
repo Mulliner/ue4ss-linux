@@ -94,6 +94,7 @@ namespace RC
             std::ifstream ini_file(file_name);
             if (ini_file.is_open())
             {
+                fprintf(stderr, "[UE4SS] SettingsManager: INI file opened for DiscordWebhookURL scan\n");
                 std::string line;
                 while (std::getline(ini_file, line))
                 {
@@ -108,11 +109,19 @@ namespace RC
                         if (!url.empty())
                         {
                             General.DiscordWebhookURL = StringType(url.begin(), url.end());
-                            fprintf(stderr, "[UE4SS] SettingsManager: found DiscordWebhookURL in INI\n");
+                            fprintf(stderr, "[UE4SS] SettingsManager: found DiscordWebhookURL in INI (%zu chars)\n", url.size());
+                        }
+                        else
+                        {
+                            fprintf(stderr, "[UE4SS] SettingsManager: DiscordWebhookURL found in INI but is EMPTY - please set it in UE4SS-settings.ini\n");
                         }
                         break;
                     }
                 }
+            }
+            else
+            {
+                fprintf(stderr, "[UE4SS] SettingsManager: could not open INI file for DiscordWebhookURL scan: %s\n", file_name.string().c_str());
             }
         }
 
