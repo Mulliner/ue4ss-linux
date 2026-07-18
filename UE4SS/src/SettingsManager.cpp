@@ -89,6 +89,33 @@ namespace RC
         CrashDump.EnableDumping = false;
         CrashDump.FullMemoryDump = false;
 
+        // Read DiscordWebhookURL from INI file manually (simple string search)
+        {
+            std::ifstream ini_file(file_name);
+            if (ini_file.is_open())
+            {
+                std::string line;
+                while (std::getline(ini_file, line))
+                {
+                    // Look for DiscordWebhookURL= in the line
+                    auto pos = line.find("DiscordWebhookURL=");
+                    if (pos != std::string::npos)
+                    {
+                        std::string url = line.substr(pos + 18);
+                        // Trim whitespace
+                        while (!url.empty() && (url.front() == ' ' || url.front() == '\t' || url.front() == '\r')) url.erase(url.begin());
+                        while (!url.empty() && (url.back() == ' ' || url.back() == '\t' || url.back() == '\r')) url.pop_back();
+                        if (!url.empty())
+                        {
+                            General.DiscordWebhookURL = StringType(url.begin(), url.end());
+                            fprintf(stderr, "[UE4SS] SettingsManager: found DiscordWebhookURL in INI\n");
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+
         fprintf(stderr, "[UE4SS] SettingsManager: hardcoded defaults applied.\n");
 #else
         fprintf(stderr, "[UE4SS] SettingsManager: opening file %s...\n", file_name.string().c_str());

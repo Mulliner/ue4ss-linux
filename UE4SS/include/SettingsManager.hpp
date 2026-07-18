@@ -44,6 +44,7 @@ namespace RC
             bool SearchByAddress{false};
             GameThreadExecutionMethod DefaultExecuteInGameThreadMethod{GameThreadExecutionMethod::EngineTick};
             Unreal::UnrealInitializer::FNameToStringMethod DefaultFNameToStringMethod{Unreal::UnrealInitializer::FNameToStringMethod::Scan};
+            StringType DiscordWebhookURL{};
         } General;
 
         struct SectionEngineVersionOverride

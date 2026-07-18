@@ -36,6 +36,9 @@
 #include <Mod/CppMod.hpp>
 #include <Mod/LuaMod.hpp>
 #include <Mod/Mod.hpp>
+#ifdef __linux__
+#include <DiscordWebhook.hpp>
+#endif
 #include <ObjectDumper/ObjectToString.hpp>
 #include <SDKGenerator/Generator.hpp>
 #include <SDKGenerator/UEHeaderGenerator.hpp>
@@ -235,6 +238,7 @@ namespace RC
                     default_settings << "DoEarlyScan=false\n";
                     default_settings << "bEnableSeachByMemoryAddress=false\n";
                     default_settings << "DefaultExecuteInGameThreadMethod=GameThread\n";
+                    default_settings << "DiscordWebhookURL=\n";
                     default_settings << "[Debug]\n";
                     default_settings << "DebugConsoleEnabled=false\n";
                     default_settings << "SimpleConsoleEnabled=true\n";
@@ -549,6 +553,21 @@ namespace RC
             Output::send(STR("\n"));
             Output::send(STR("log directory: {}\n"), ensure_str(m_log_directory));
             Output::send(STR("object dumper directory: {}\n\n\n"), ensure_str(m_object_dumper_output_directory));
+
+#ifdef __linux__
+            // Send Discord webhook notification if configured
+            if (!settings_manager.General.DiscordWebhookURL.empty())
+            {
+                std::string webhook_url = to_string(settings_manager.General.DiscordWebhookURL);
+                std::string description = "UE4SS has been initialized successfully.\n";
+                description += "Game executable: " + to_string(ensure_str(m_game_path_and_exe_name)) + "\n";
+                description += "Working directory: " + to_string(ensure_str(m_working_directory)) + "\n";
+                description += "Mods directory: " + to_string(ensure_str(m_mods_directories.empty() ? STR("") : m_mods_directories[0])) + "\n";
+                description += "UE4SS version: v3.0.1 Beta";
+                DiscordWebhook::send_embed(webhook_url, "UE4SS Status", description, 0x00FF00);
+                fprintf(stderr, "[UE4SS] Discord webhook notification sent.\n");
+            }
+#endif
         }
         catch (std::runtime_error& e)
         {
