@@ -210,16 +210,19 @@ namespace RC
             fprintf(stderr, "[UE4SS] Constructor: setup_paths() done. root=%s\n", m_root_directory.string().c_str());
 
             // Auto-create UE4SS-settings.ini with default content if it doesn't exist
+            fprintf(stderr, "[UE4SS] Constructor: checking settings file at %s...\n", m_settings_path_and_file.string().c_str());
             if (!std::filesystem::exists(m_settings_path_and_file))
             {
-                std::filesystem::create_directories(m_settings_path_and_file.parent_path());
+                fprintf(stderr, "[UE4SS] Constructor: creating default settings file...\n");
+                std::error_code ec;
+                std::filesystem::create_directories(m_settings_path_and_file.parent_path(), ec);
+                if (ec)
+                {
+                    fprintf(stderr, "[UE4SS] Constructor: failed to create directories: %s\n", ec.message().c_str());
+                }
                 std::ofstream default_settings(m_settings_path_and_file);
                 if (default_settings.is_open())
                 {
-                    default_settings << "[Overrides]\n";
-                    default_settings << "; ModsFolderPath=./Mods\n";
-                    default_settings << "; ControllingModsTxt=\n";
-                    default_settings << "\n";
                     default_settings << "[General]\n";
                     default_settings << "EnableHotReloadSystem=true\n";
                     default_settings << "HotReloadKey=R\n";
@@ -232,15 +235,12 @@ namespace RC
                     default_settings << "DoEarlyScan=false\n";
                     default_settings << "bEnableSeachByMemoryAddress=false\n";
                     default_settings << "DefaultExecuteInGameThreadMethod=GameThread\n";
-                    default_settings << "\n";
                     default_settings << "[Debug]\n";
                     default_settings << "DebugConsoleEnabled=false\n";
                     default_settings << "SimpleConsoleEnabled=true\n";
-                    default_settings << "\n";
                     default_settings << "[Threads]\n";
                     default_settings << "SigScannerNumThreads=-1\n";
                     default_settings << "SigScannerMultithreadingModuleSizeThreshold=104857600\n";
-                    default_settings << "\n";
                     default_settings << "[Hooks]\n";
                     default_settings << "HookProcessInternal=true\n";
                     default_settings << "HookProcessLocalScriptFunction=true\n";
@@ -603,7 +603,8 @@ namespace RC
         AddDllDirectory(game_exe_path.c_str());
 #endif
 
-        for (const auto& item : std::filesystem::directory_iterator(m_root_directory))
+        std::error_code dir_ec;
+        for (const auto& item : std::filesystem::directory_iterator(m_root_directory, dir_ec))
         {
             if (!item.is_directory())
             {

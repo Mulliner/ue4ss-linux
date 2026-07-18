@@ -86,23 +86,50 @@ static auto wait_for_game_ready() -> void
         sleep(1);
         fprintf(stderr, "[UE4SS] Waiting... (%d/10)\n", i + 1);
     }
+}
 
-    // Verify we can read /proc/self/exe (game executable is loaded)
+// Check if this process is the game server (not a helper like crashpad_handler)
+static auto is_game_process() -> bool
+{
     char exe_path_buffer[1024]{};
     ssize_t len = readlink("/proc/self/exe", exe_path_buffer, sizeof(exe_path_buffer) - 1);
     if (len <= 0)
     {
-        fprintf(stderr, "[UE4SS] Error: Cannot determine game executable path. Aborting.\n");
-        return;
+        return false;
     }
 
-    fprintf(stderr, "[UE4SS] Detected game executable: %s\n", exe_path_buffer);
+    std::string exe_path(exe_path_buffer);
+    std::string exe_name = exe_path;
+    size_t last_slash = exe_name.find_last_of('/');
+    if (last_slash != std::string::npos)
+    {
+        exe_name = exe_name.substr(last_slash + 1);
+    }
+
+    // Filter out known helper processes that also get LD_PRELOAD
+    if (exe_name.find("crashpad") != std::string::npos ||
+        exe_name.find("Crashpad") != std::string::npos ||
+        exe_name.find("crash_reporter") != std::string::npos ||
+        exe_name.find("EpicServices") != std::string::npos)
+    {
+        fprintf(stderr, "[UE4SS] Skipping non-game process: %s\n", exe_path.c_str());
+        return false;
+    }
+
+    fprintf(stderr, "[UE4SS] Detected game executable: %s\n", exe_path.c_str());
+    return true;
 }
 
 static auto thread_dll_start() -> void
 {
     try
     {
+        // Check if this is the game process, not a helper like crashpad_handler
+        if (!is_game_process())
+        {
+            return;
+        }
+
         wait_for_game_ready();
 
         auto module_path = get_module_path();
