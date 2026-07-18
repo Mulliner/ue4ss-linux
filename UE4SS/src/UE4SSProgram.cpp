@@ -14,6 +14,7 @@
 #include <cwctype>
 #include <format>
 #include <fstream>
+#include <functional>
 #include <limits>
 #include <unordered_set>
 #include <fmt/chrono.h>
@@ -75,6 +76,10 @@
 #endif
 
 #include <FilesystemWatcher.hpp>
+
+#ifdef __linux__
+extern "C" bool ue4ss_with_crash_recovery(const std::function<void()>& func);
+#endif
 
 namespace RC
 {
@@ -1967,9 +1972,15 @@ namespace RC
                     {
 #ifdef __linux__
                         fprintf(stderr, "[UE4SS] Starting %s mod '%s'\n", std::is_same_v<ModType, LuaMod> ? "Lua" : "C++", std::string(mod->get_name().begin(), mod->get_name().end()).c_str());
-#endif
+                        bool ok = ue4ss_with_crash_recovery([&]() { mod->start_mod(); });
+                        if (!ok)
+                        {
+                            fprintf(stderr, "[UE4SS] Mod '%s' crashed during startup, continuing to next mod.\n", std::string(mod->get_name().begin(), mod->get_name().end()).c_str());
+                        }
+#else
                         Output::send(STR("Starting {} mod '{}'\n"), std::is_same_v<ModType, LuaMod> ? STR("Lua") : STR("C++"), mod->get_name().data());
                         mod->start_mod();
+#endif
                     }
                     else
                     {
@@ -2030,8 +2041,14 @@ namespace RC
                 Output::send(STR("Mod '{}' has enabled.txt, starting mod.\n"), mod->get_name().data());
 #ifdef __linux__
                 fprintf(stderr, "[UE4SS] Mod '%s' has enabled.txt, starting mod.\n", std::string(mod->get_name().begin(), mod->get_name().end()).c_str());
-#endif
+                bool ok = ue4ss_with_crash_recovery([&]() { mod->start_mod(); });
+                if (!ok)
+                {
+                    fprintf(stderr, "[UE4SS] Mod '%s' crashed during startup (enabled.txt), continuing to next mod.\n", std::string(mod->get_name().begin(), mod->get_name().end()).c_str());
+                }
+#else
                 mod->start_mod();
+#endif
             }
         }
 

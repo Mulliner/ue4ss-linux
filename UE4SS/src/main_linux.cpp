@@ -17,6 +17,7 @@
 #include <filesystem>
 #include <signal.h>
 #include <setjmp.h>
+#include <functional>
 
 #include "UE4SSProgram.hpp"
 #include <DynamicOutput/DynamicOutput.hpp>
@@ -31,12 +32,22 @@ static UE4SSProgram* s_program = nullptr;
 // SIGSEGV recovery for UE4SS init thread
 static thread_local sigjmp_buf s_init_jmpbuf;
 static thread_local bool s_has_jmpbuf = false;
+// Per-mod SIGSEGV recovery (checked first by signal handler)
+static thread_local sigjmp_buf s_mod_jmpbuf;
+static thread_local bool s_has_mod_jmpbuf = false;
 static struct sigaction s_old_sigsegv;
 static struct sigaction s_old_sigbus;
 
 static void ue4ss_sigsegv_handler(int sig, siginfo_t* info, void* ucontext)
 {
     (void)info; (void)ucontext;
+    // Check per-mod recovery first
+    if (s_has_mod_jmpbuf)
+    {
+        fprintf(stderr, "[UE4SS] Caught signal %d during mod execution, recovering...\n", sig);
+        s_has_mod_jmpbuf = false;
+        siglongjmp(s_mod_jmpbuf, sig);
+    }
     if (s_has_jmpbuf)
     {
         fprintf(stderr, "[UE4SS] Caught signal %d during init, recovering...\n", sig);
@@ -46,6 +57,23 @@ static void ue4ss_sigsegv_handler(int sig, siginfo_t* info, void* ucontext)
     signal(SIGSEGV, SIG_DFL);
     signal(SIGBUS, SIG_DFL);
     raise(sig);
+}
+
+// Wrap a callable with per-mod SIGSEGV recovery.
+// Returns true if the callable completed normally, false if it crashed.
+extern "C" bool ue4ss_with_crash_recovery(const std::function<void()>& func)
+{
+    int sig = sigsetjmp(s_mod_jmpbuf, 1);
+    if (sig != 0)
+    {
+        fprintf(stderr, "[UE4SS] Recovered from signal %d during mod execution, continuing to next mod.\n", sig);
+        s_has_mod_jmpbuf = false;
+        return false;
+    }
+    s_has_mod_jmpbuf = true;
+    func();
+    s_has_mod_jmpbuf = false;
+    return true;
 }
 
 static auto install_signal_handlers() -> void
