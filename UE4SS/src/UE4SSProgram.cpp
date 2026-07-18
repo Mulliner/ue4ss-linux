@@ -1268,6 +1268,20 @@ namespace RC
         Unreal::UnrealInitializer::Initialize(config);
         fprintf(stderr, "[UE4SS] UnrealInitializer::Initialize() done.\n");
 
+#ifdef __linux__
+        // On Linux, the engine tick hook is never installed (no function addresses),
+        // so the RegisterEngineTickPreCallback lambda in on_program_start() that loads
+        // Lua mods will never fire. Call them directly here.
+        fprintf(stderr, "[UE4SS] Linux: loading Lua mods directly (no engine tick hook)...\n");
+        TRY([&] {
+            install_lua_mods();
+            LuaMod::on_program_start();
+            fire_program_start_for_cpp_mods();
+            start_lua_mods();
+            fprintf(stderr, "[UE4SS] Linux: Lua mods loaded.\n");
+        });
+#endif
+
         output_all_member_offsets(IsCoalesced::Yes);
 
         bool can_create_custom_events{true};
