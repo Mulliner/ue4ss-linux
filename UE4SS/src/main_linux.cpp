@@ -16,6 +16,7 @@
 #include <string>
 #include <filesystem>
 #include <signal.h>
+#include <setjmp.h>
 
 #include "UE4SSProgram.hpp"
 #include <DynamicOutput/DynamicOutput.hpp>
@@ -26,6 +27,42 @@ using namespace RC;
 
 static std::atomic<bool> s_ue4ss_initialized{false};
 static UE4SSProgram* s_program = nullptr;
+
+// SIGSEGV recovery for UE4SS init thread
+static thread_local sigjmp_buf s_init_jmpbuf;
+static thread_local bool s_has_jmpbuf = false;
+static struct sigaction s_old_sigsegv;
+static struct sigaction s_old_sigbus;
+
+static void ue4ss_sigsegv_handler(int sig, siginfo_t* info, void* ucontext)
+{
+    (void)info; (void)ucontext;
+    if (s_has_jmpbuf)
+    {
+        fprintf(stderr, "[UE4SS] Caught signal %d during init, recovering...\n", sig);
+        siglongjmp(s_init_jmpbuf, sig);
+    }
+    // No jump buffer - restore original handler and re-raise
+    signal(SIGSEGV, SIG_DFL);
+    signal(SIGBUS, SIG_DFL);
+    raise(sig);
+}
+
+static auto install_signal_handlers() -> void
+{
+    struct sigaction sa{};
+    sa.sa_sigaction = ue4ss_sigsegv_handler;
+    sa.sa_flags = SA_SIGINFO;
+    sigemptyset(&sa.sa_mask);
+    sigaction(SIGSEGV, &sa, &s_old_sigsegv);
+    sigaction(SIGBUS, &sa, &s_old_sigbus);
+}
+
+static auto restore_signal_handlers() -> void
+{
+    sigaction(SIGSEGV, &s_old_sigsegv, nullptr);
+    sigaction(SIGBUS, &s_old_sigbus, nullptr);
+}
 
 static auto get_module_path() -> std::filesystem::path
 {
@@ -38,13 +75,17 @@ static auto get_module_path() -> std::filesystem::path
 }
 
 // Wait for the game's main executable to be fully loaded before initializing UE4SS.
-// We do this by checking if /proc/self/exe is valid and the game binary is mapped.
 static auto wait_for_game_ready() -> void
 {
-    // Give the game time to load its own libraries and initialize
-    // This is critical - running too early will cause segfaults
-    // because the game's memory layout isn't set up yet.
-    sleep(2);
+    // Wait for the game to fully initialize its memory layout.
+    // UE5 games (like Palworld) need significant time to load.
+    // We wait in stages and check if the game is still alive.
+    fprintf(stderr, "[UE4SS] Waiting for game to initialize...\n");
+    for (int i = 0; i < 10; ++i)
+    {
+        sleep(1);
+        fprintf(stderr, "[UE4SS] Waiting... (%d/10)\n", i + 1);
+    }
 
     // Verify we can read /proc/self/exe (game executable is loaded)
     char exe_path_buffer[1024]{};
@@ -60,6 +101,18 @@ static auto wait_for_game_ready() -> void
 
 static auto thread_dll_start() -> void
 {
+    // Install our signal handlers so we can recover from segfaults during init
+    install_signal_handlers();
+
+    int sig = sigsetjmp(s_init_jmpbuf, 1);
+    if (sig != 0)
+    {
+        fprintf(stderr, "[UE4SS] Recovered from signal %d. UE4SS init failed but game should continue.\n", sig);
+        restore_signal_handlers();
+        return;
+    }
+    s_has_jmpbuf = true;
+
     try
     {
         wait_for_game_ready();
@@ -67,8 +120,12 @@ static auto thread_dll_start() -> void
         auto module_path = get_module_path();
         fprintf(stderr, "[UE4SS] Library path: %s\n", module_path.string().c_str());
 
+        fprintf(stderr, "[UE4SS] Creating UE4SSProgram instance...\n");
         s_program = new UE4SSProgram(module_path, {});
+
+        fprintf(stderr, "[UE4SS] Calling init()...\n");
         s_program->init();
+        fprintf(stderr, "[UE4SS] init() completed successfully.\n");
 
         if (auto e = s_program->get_error_object(); e->has_error())
         {
@@ -83,6 +140,7 @@ static auto thread_dll_start() -> void
         }
 
         s_ue4ss_initialized.store(true, std::memory_order_release);
+        fprintf(stderr, "[UE4SS] Initialization complete.\n");
     }
     catch (const std::exception& e)
     {
@@ -92,6 +150,9 @@ static auto thread_dll_start() -> void
     {
         fprintf(stderr, "[UE4SS] Unknown exception during init\n");
     }
+
+    s_has_jmpbuf = false;
+    restore_signal_handlers();
 }
 
 // This constructor runs when the shared library is loaded via LD_PRELOAD.
@@ -108,12 +169,15 @@ static void ue4ss_linux_init()
 __attribute__((destructor))
 static void ue4ss_linux_cleanup()
 {
-    fprintf(stderr, "[UE4SS] Cleaning up...\n");
-    UE4SSProgram::static_cleanup();
-    if (s_program)
+    if (s_ue4ss_initialized.load(std::memory_order_acquire))
     {
-        delete s_program;
-        s_program = nullptr;
+        fprintf(stderr, "[UE4SS] Cleaning up...\n");
+        UE4SSProgram::static_cleanup();
+        if (s_program)
+        {
+            delete s_program;
+            s_program = nullptr;
+        }
     }
 }
 

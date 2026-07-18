@@ -437,13 +437,23 @@ namespace RC
             m_load_library_ex_w_hook->hook();
 #endif // _WIN32
 
+            fprintf(stderr, "[UE4SS] Calling SetupUnrealModules()...\n");
             Unreal::UnrealInitializer::SetupUnrealModules();
+            fprintf(stderr, "[UE4SS] SetupUnrealModules() done.\n");
 
+            fprintf(stderr, "[UE4SS] Setting up mod directory path...\n");
             setup_mod_directory_path();
+            fprintf(stderr, "[UE4SS] Mod directory path set.\n");
 
+            fprintf(stderr, "[UE4SS] Setting up mods...\n");
             setup_mods();
+            fprintf(stderr, "[UE4SS] Mods setup done.\n");
+
+            fprintf(stderr, "[UE4SS] Installing C++ mods...\n");
             install_cpp_mods();
+            fprintf(stderr, "[UE4SS] Starting C++ mods...\n");
             start_cpp_mods(IsInitialStartup::Yes);
+            fprintf(stderr, "[UE4SS] C++ mods started.\n");
 
             if (m_has_game_specific_config)
             {
@@ -996,21 +1006,25 @@ namespace RC
         Output::send<LogLevel::Warning>(STR("DebugGame Setting Enabled? {}\n"), Unreal::Version::DebugBuild);
         if (settings_manager.General.DoEarlyScan)
         {
-            // Scan a single time while the game thread is locked after UE4SS is attached.
+            fprintf(stderr, "[UE4SS] PreInitialize (early scan)...\n");
             Unreal::UnrealInitializer::PreInitialize(config);
+            fprintf(stderr, "[UE4SS] PreInitialize done. Scanning game...\n");
             try
             {
                 Unreal::UnrealInitializer::ScanGame();
+                fprintf(stderr, "[UE4SS] ScanGame done.\n");
             }
-            catch (std::runtime_error&)
+            catch (std::runtime_error& e)
             {
-                // No work to be done here. Error is non-fatal, just let the 'Initialize' function take it from here.
+                fprintf(stderr, "[UE4SS] ScanGame error (non-fatal): %s\n", e.what());
             }
         }
         cpp_mods_done_loading.store(true);
         cpp_mods_done_loading.notify_one();
         // Continuous scanning, and finish initializing after the game thread is unlocked.
+        fprintf(stderr, "[UE4SS] Calling UnrealInitializer::Initialize()...\n");
         Unreal::UnrealInitializer::Initialize(config);
+        fprintf(stderr, "[UE4SS] UnrealInitializer::Initialize() done.\n");
 
         output_all_member_offsets(IsCoalesced::Yes);
 
