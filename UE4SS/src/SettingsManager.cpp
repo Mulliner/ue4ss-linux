@@ -1,3 +1,4 @@
+#include <cstdio>
 #include <Helpers/String.hpp>
 #include <IniParser/Ini.hpp>
 #include <SettingsManager.hpp>
@@ -43,9 +44,12 @@ namespace RC
 {
     auto SettingsManager::deserialize(std::filesystem::path& file_name) -> void
     {
+        fprintf(stderr, "[UE4SS] SettingsManager: opening file %s...\n", file_name.string().c_str());
         auto file = File::open(file_name, File::OpenFor::Reading, File::OverwriteExistingFile::No, File::CreateIfNonExistent::Yes);
+        fprintf(stderr, "[UE4SS] SettingsManager: file opened, parsing...\n");
         Ini::Parser parser;
         parser.parse(file);
+        fprintf(stderr, "[UE4SS] SettingsManager: parse done.\n");
         file.close();
 
         constexpr static File::CharType section_overrides[] = STR("Overrides");

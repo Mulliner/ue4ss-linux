@@ -5,6 +5,7 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <cstring>
+#include <cstdio>
 
 #include <File/File.hpp>
 #include <File/FileType/LinuxFile.hpp>
@@ -334,6 +335,7 @@ namespace RC::File
 
     auto LinuxFile::read_all() const -> StringType
     {
+        fprintf(stderr, "[UE4SS] LinuxFile::read_all: reading %s\n", get_file_path().string().c_str());
         // Use narrow stream to read bytes, then convert to wide string
         // Using wifstream directly causes issues because tellg() returns byte offset
         // but resize(size) allocates size wchar_t's (4x the memory on Linux)
@@ -420,6 +422,7 @@ namespace RC::File
 
     auto LinuxFile::open_file(const std::filesystem::path& file_name_and_path, const OpenProperties& open_properties) -> LinuxFile
     {
+        fprintf(stderr, "[UE4SS] LinuxFile::open_file: %s\n", file_name_and_path.string().c_str());
         if (file_name_and_path.empty())
         {
             THROW_INTERNAL_FILE_ERROR("[LinuxFile::open_file] Tried to open file but file_name_and_path was empty.")
@@ -453,7 +456,9 @@ namespace RC::File
             flags |= O_TRUNC;
         }
 
+        fprintf(stderr, "[UE4SS] LinuxFile::open_file: converting path...\n");
         auto path_utf8 = to_string(file_name_and_path.wstring());
+        fprintf(stderr, "[UE4SS] LinuxFile::open_file: path converted to: %s\n", path_utf8.c_str());
         int fd = ::open(path_utf8.c_str(), flags, 0644);
         if (fd < 0)
         {
@@ -461,6 +466,7 @@ namespace RC::File
             THROW_INTERNAL_FILE_ERROR(fmt::format("[LinuxFile::open_file] Tried opening file for {} but encountered an error. Path & File: {} | error: {}\n",
                                                   open_type, file_name_and_path.string(), SysError(errno).str()))
         }
+        fprintf(stderr, "[UE4SS] LinuxFile::open_file: fd=%d\n", fd);
 
         LinuxFile file{};
         file.set_file(reinterpret_cast<HANDLE>(static_cast<intptr_t>(fd)));
