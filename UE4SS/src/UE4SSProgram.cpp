@@ -207,6 +207,51 @@ namespace RC
         {
             setup_paths(moduleFilePath);
 
+            // Auto-create UE4SS-settings.ini with default content if it doesn't exist
+            if (!std::filesystem::exists(m_settings_path_and_file))
+            {
+                std::filesystem::create_directories(m_settings_path_and_file.parent_path());
+                std::ofstream default_settings(m_settings_path_and_file);
+                if (default_settings.is_open())
+                {
+                    default_settings << "[Overrides]\n";
+                    default_settings << "; ModsFolderPath=./Mods\n";
+                    default_settings << "; ControllingModsTxt=\n";
+                    default_settings << "\n";
+                    default_settings << "[General]\n";
+                    default_settings << "EnableHotReloadSystem=true\n";
+                    default_settings << "HotReloadKey=R\n";
+                    default_settings << "EnableAutoReloadingLuaMods=true\n";
+                    default_settings << "UseCache=true\n";
+                    default_settings << "InvalidateCacheIfDLLDiffers=true\n";
+                    default_settings << "EnableDebugKeyBindings=false\n";
+                    default_settings << "SecondsToScanBeforeGivingUp=30\n";
+                    default_settings << "bUseUObjectArrayCache=true\n";
+                    default_settings << "DoEarlyScan=false\n";
+                    default_settings << "bEnableSeachByMemoryAddress=false\n";
+                    default_settings << "DefaultExecuteInGameThreadMethod=GameThread\n";
+                    default_settings << "\n";
+                    default_settings << "[Debug]\n";
+                    default_settings << "DebugConsoleEnabled=false\n";
+                    default_settings << "SimpleConsoleEnabled=true\n";
+                    default_settings << "\n";
+                    default_settings << "[Threads]\n";
+                    default_settings << "SigScannerNumThreads=-1\n";
+                    default_settings << "SigScannerMultithreadingModuleSizeThreshold=104857600\n";
+                    default_settings << "\n";
+                    default_settings << "[Hooks]\n";
+                    default_settings << "HookProcessInternal=true\n";
+                    default_settings << "HookProcessLocalScriptFunction=true\n";
+                    default_settings << "HookLoadMap=true\n";
+                    default_settings << "HookInitGameState=true\n";
+                    default_settings << "HookCallFunctionByNameWithArguments=true\n";
+                    default_settings << "HookBeginPlay=true\n";
+                    default_settings << "HookEndPlay=true\n";
+                    default_settings.close();
+                    Output::send(STR("Created default settings file: {}\n"), ensure_str(m_settings_path_and_file));
+                }
+            }
+
             try
             {
                 settings_manager.deserialize(m_settings_path_and_file);
@@ -567,6 +612,34 @@ namespace RC
         }
 
         insert_mods_directory(default_mods_path, 0);
+
+        // Auto-create the primary mods directory if it doesn't exist
+        if (!std::filesystem::exists(default_mods_path))
+        {
+            std::error_code ec;
+            std::filesystem::create_directories(default_mods_path, ec);
+            if (!ec)
+            {
+                Output::send(STR("Created mods directory: {}\n"), ensure_str(default_mods_path));
+            }
+        }
+
+        // Auto-create a default mods.txt if it doesn't exist in the primary mods directory
+        auto mods_txt_path = default_mods_path / "mods.txt";
+        if (!std::filesystem::exists(mods_txt_path))
+        {
+            std::ofstream mods_txt(mods_txt_path);
+            if (mods_txt.is_open())
+            {
+                mods_txt << "; Lines starting with ';' are comments\n";
+                mods_txt << "; Add mod folder names here (one per line) to enable them\n";
+                mods_txt << "; Prefix with ';' to disable a mod\n";
+                mods_txt << "; Example:\n";
+                mods_txt << "; MyLuaMod\n";
+                mods_txt.close();
+                Output::send(STR("Created default mods.txt: {}\n"), ensure_str(mods_txt_path));
+            }
+        }
 
         for (const auto& path : m_mods_directories_to_remove)
         {
