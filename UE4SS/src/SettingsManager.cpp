@@ -51,8 +51,10 @@ namespace RC
         parser.parse(file);
         fprintf(stderr, "[UE4SS] SettingsManager: parse done.\n");
         file.close();
+        fprintf(stderr, "[UE4SS] SettingsManager: file closed.\n");
 
         constexpr static File::CharType section_overrides[] = STR("Overrides");
+        fprintf(stderr, "[UE4SS] SettingsManager: reading Overrides section...\n");
         REGISTER_STRING_SETTING(Overrides.ModsFolderPath, section_overrides, ModsFolderPath)
 
         auto mods_paths_list = parser.get_list(section_overrides);
@@ -68,11 +70,14 @@ namespace RC
         });
 
         REGISTER_STRING_SETTING(Overrides.ControllingModsTxt, section_overrides, ControllingModsTxt)
+        fprintf(stderr, "[UE4SS] SettingsManager: reading General section...\n");
 
         constexpr static File::CharType section_general[] = STR("General");
         REGISTER_BOOL_SETTING(General.EnableHotReloadSystem, section_general, EnableHotReloadSystem)
+        fprintf(stderr, "[UE4SS] SettingsManager: EnableHotReloadSystem done.\n");
         StringType hot_reload_key{};
         REGISTER_STRING_SETTING(hot_reload_key, section_general, HotReloadKey)
+        fprintf(stderr, "[UE4SS] SettingsManager: HotReloadKey done.\n");
         if (!hot_reload_key.empty())
         {
             try
@@ -89,7 +94,9 @@ namespace RC
         REGISTER_BOOL_SETTING(General.UseCache, section_general, UseCache)
         REGISTER_BOOL_SETTING(General.InvalidateCacheIfDLLDiffers, section_general, InvalidateCacheIfDLLDiffers)
         REGISTER_BOOL_SETTING(General.EnableDebugKeyBindings, section_general, EnableDebugKeyBindings)
+        fprintf(stderr, "[UE4SS] SettingsManager: reading SecondsToScanBeforeGivingUp...\n");
         REGISTER_INT64_SETTING(General.SecondsToScanBeforeGivingUp, section_general, SecondsToScanBeforeGivingUp)
+        fprintf(stderr, "[UE4SS] SettingsManager: SecondsToScanBeforeGivingUp done.\n");
         REGISTER_BOOL_SETTING(General.UseUObjectArrayCache, section_general, bUseUObjectArrayCache)
         REGISTER_BOOL_SETTING(General.DoEarlyScan, section_general, DoEarlyScan)
         REGISTER_BOOL_SETTING(General.SearchByAddress, section_general, bEnableSeachByMemoryAddress)
