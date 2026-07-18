@@ -1715,6 +1715,10 @@ namespace RC
                 else
                 {
                     auto mod_name = ensure_str(sub_directory.path().stem());
+#ifdef __linux__
+                    fprintf(stderr, "[UE4SS] setup_mods: found directory '%s' (full path: %s)\n", std::string(mod_name.begin(), mod_name.end()).c_str(), sub_directory.path().string().c_str());
+                    fprintf(stderr, "[UE4SS] setup_mods: has scripts/ = %s, has dlls/ = %s\n", std::filesystem::exists(sub_directory.path() / "scripts") ? "yes" : "no", std::filesystem::exists(sub_directory.path() / "dlls") ? "yes" : "no");
+#endif
                     // Create the mod but don't install it yet
                     if (!find_mod_by_name<LuaMod>(mod_name) && std::filesystem::exists(sub_directory.path() / "scripts"))
                         m_mods.emplace_back(std::make_unique<LuaMod>(*this, std::move(mod_name), ensure_str(sub_directory.path())));
