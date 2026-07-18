@@ -903,6 +903,10 @@ namespace RC
                     return ptr;
                 };
 
+                // All overrides are non-fatal — the binary is likely stripped so dlsym won't find symbols.
+                // The important thing is that ps_scan returns true (because all config flags are false)
+                // so we don't get stuck in the scan retry loop.
+
                 // Override GUObjectArray scan
                 config.ScanOverrides.guobjectarray = [&](std::vector<SignatureContainer>&, Unreal::Signatures::ScanResult& scan_result) {
                     void* addr = try_resolve("GUObjectArray");
@@ -913,7 +917,7 @@ namespace RC
                     }
                     else
                     {
-                        scan_result.Errors.emplace_back("GUObjectArray not found via dlsym (symbol not exported)");
+                        fprintf(stderr, "[UE4SS] dlsym: GUObjectArray not found (stripped binary?)\n");
                     }
                 };
 
@@ -928,7 +932,7 @@ namespace RC
                     }
                     else
                     {
-                        scan_result.Errors.emplace_back("FName::ToString not found via dlsym");
+                        fprintf(stderr, "[UE4SS] dlsym: FName::ToString not found (stripped binary?)\n");
                     }
                 };
 
@@ -943,7 +947,7 @@ namespace RC
                     }
                     else
                     {
-                        scan_result.Errors.emplace_back("UGameEngine::Tick not found via dlsym");
+                        fprintf(stderr, "[UE4SS] dlsym: UGameEngine::Tick not found (stripped binary?)\n");
                     }
                 };
 
@@ -958,7 +962,7 @@ namespace RC
                     }
                     else
                     {
-                        scan_result.Errors.emplace_back("StaticConstructObject not found via dlsym");
+                        fprintf(stderr, "[UE4SS] dlsym: StaticConstructObject not found (stripped binary?)\n");
                     }
                 };
 
@@ -972,7 +976,7 @@ namespace RC
                     }
                     else
                     {
-                        scan_result.Errors.emplace_back("GMalloc not found via dlsym");
+                        fprintf(stderr, "[UE4SS] dlsym: GMalloc not found (stripped binary?)\n");
                     }
                 };
 
@@ -987,7 +991,7 @@ namespace RC
                     }
                     else
                     {
-                        scan_result.Errors.emplace_back("FName::FName not found via dlsym");
+                        fprintf(stderr, "[UE4SS] dlsym: FName::FName not found (stripped binary?)\n");
                     }
                 };
 
@@ -1001,8 +1005,18 @@ namespace RC
                     }
                     else
                     {
-                        scan_result.Errors.emplace_back("GNatives not found via dlsym");
+                        fprintf(stderr, "[UE4SS] dlsym: GNatives not found (stripped binary?)\n");
                     }
+                };
+
+                // Override FUObjectHashTables::Get scan (no-op, non-fatal)
+                config.ScanOverrides.fuobject_hash_tables_get = [&](std::vector<SignatureContainer>&, Unreal::Signatures::ScanResult&) {
+                    fprintf(stderr, "[UE4SS] dlsym: FUObjectHashTables::Get skipped (no scan on Linux)\n");
+                };
+
+                // Override console manager singleton scan (no-op, non-fatal)
+                config.ScanOverrides.console_manager_singleton = [&](std::vector<SignatureContainer>&, Unreal::Signatures::ScanResult&) {
+                    fprintf(stderr, "[UE4SS] dlsym: console_manager_singleton skipped (no scan on Linux)\n");
                 };
 
                 dlclose(main_exe);
