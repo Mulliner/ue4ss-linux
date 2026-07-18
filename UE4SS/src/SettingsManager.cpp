@@ -44,6 +44,53 @@ namespace RC
 {
     auto SettingsManager::deserialize(std::filesystem::path& file_name) -> void
     {
+#ifdef __linux__
+        // On Linux, the INI parser crashes with SIGSEGV when accessing the unordered_map
+        // after parsing. This is likely due to memory corruption from the game's own
+        // memory allocator interfering with our std::wstring operations.
+        // Use hardcoded defaults instead.
+        fprintf(stderr, "[UE4SS] SettingsManager: using hardcoded defaults on Linux (INI parser bypass)\n");
+
+        General.EnableHotReloadSystem = true;
+        General.EnableAutoReloadingLuaMods = true;
+        General.UseCache = true;
+        General.InvalidateCacheIfDLLDiffers = true;
+        General.EnableDebugKeyBindings = false;
+        General.SecondsToScanBeforeGivingUp = 30;
+        General.UseUObjectArrayCache = true;
+        General.DoEarlyScan = false;
+        General.SearchByAddress = false;
+        General.DefaultExecuteInGameThreadMethod = GameThreadExecutionMethod::EngineTick;
+
+        Debug.SimpleConsoleEnabled = true;
+        Debug.DebugConsoleEnabled = false;
+        Debug.DebugConsoleVisible = false;
+        Debug.DebugGUIFontScaling = 1.0f;
+
+        Threads.SigScannerNumThreads = -1;
+        Threads.SigScannerMultithreadingModuleSizeThreshold = 104857600;
+
+        Hooks.HookProcessInternal = true;
+        Hooks.HookProcessLocalScriptFunction = true;
+        Hooks.HookLoadMap = true;
+        Hooks.HookInitGameState = true;
+        Hooks.HookCallFunctionByNameWithArguments = true;
+        Hooks.HookBeginPlay = true;
+        Hooks.HookEndPlay = true;
+        Hooks.HookLocalPlayerExec = false;
+        Hooks.HookAActorTick = false;
+        Hooks.HookEngineTick = true;
+        Hooks.HookGameViewportClientTick = false;
+        Hooks.HookUObjectProcessEvent = false;
+        Hooks.HookProcessConsoleExec = false;
+        Hooks.HookUStructLink = false;
+        Hooks.FExecVTableOffsetInLocalPlayer = 0;
+
+        CrashDump.EnableDumping = false;
+        CrashDump.FullMemoryDump = false;
+
+        fprintf(stderr, "[UE4SS] SettingsManager: hardcoded defaults applied.\n");
+#else
         fprintf(stderr, "[UE4SS] SettingsManager: opening file %s...\n", file_name.string().c_str());
         auto file = File::open(file_name, File::OpenFor::Reading, File::OverwriteExistingFile::No, File::CreateIfNonExistent::Yes);
         fprintf(stderr, "[UE4SS] SettingsManager: file opened, parsing...\n");
@@ -55,7 +102,15 @@ namespace RC
 
         constexpr static File::CharType section_overrides[] = STR("Overrides");
         fprintf(stderr, "[UE4SS] SettingsManager: reading Overrides section...\n");
-        REGISTER_STRING_SETTING(Overrides.ModsFolderPath, section_overrides, ModsFolderPath)
+        try
+        {
+            REGISTER_STRING_SETTING(Overrides.ModsFolderPath, section_overrides, ModsFolderPath)
+        }
+        catch (std::exception& e)
+        {
+            fprintf(stderr, "[UE4SS] SettingsManager: exception in Overrides: %s\n", e.what());
+        }
+        fprintf(stderr, "[UE4SS] SettingsManager: Overrides done.\n");
 
         auto mods_paths_list = parser.get_list(section_overrides);
         mods_paths_list.for_each(STR("ModsFolderPaths"), [](const StringType& key, const Ini::Value& value) {
@@ -86,7 +141,6 @@ namespace RC
             }
             catch (...)
             {
-                // Note that this happens too early to be sent to the log file or the GUI, so it will only appear in the native console on Win32, or the terminal on Linux.
                 throw std::runtime_error{fmt::format("Invalid value for 'General.HotReloadKey': {}\n", to_string(hot_reload_key))};
             }
         }
@@ -214,5 +268,6 @@ namespace RC
         REGISTER_INT64_SETTING(Hooks.FExecVTableOffsetInLocalPlayer, section_hooks, FExecVTableOffsetInLocalPlayer)
 
         constexpr static File::CharType section_experimental_features[] = STR("ExperimentalFeatures");
+#endif // __linux__
     }
 } // namespace RC
