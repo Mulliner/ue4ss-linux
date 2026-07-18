@@ -705,6 +705,12 @@ namespace RC
 
         m_scripts_path = scripts_path;
 
+#ifdef __linux__
+        fprintf(stderr, "[UE4SS] LuaMod constructor: mod '%s' scripts_path='%s' exists=%d\n",
+                std::string(mod_name.begin(), mod_name.end()).c_str(),
+                m_scripts_path.string().c_str(), (int)std::filesystem::exists(m_scripts_path));
+#endif
+
         if (!std::filesystem::exists(m_scripts_path))
         {
             Output::send<LogLevel::Error>(STR("Mod path doesn't exist {}\n"), ensure_str(m_scripts_path));
@@ -5899,27 +5905,65 @@ Overloads:
         {
             m_main_thread_id = std::this_thread::get_id();
 
+#ifdef __linux__
+            fprintf(stderr, "[UE4SS] start_mod: '%s' calling prepare_mod()...\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
+#endif
             prepare_mod(lua());
+#ifdef __linux__
+            fprintf(stderr, "[UE4SS] start_mod: '%s' prepare_mod() done.\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
+            fprintf(stderr, "[UE4SS] start_mod: '%s' calling make_main_state()...\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
+#endif
             make_main_state(this, lua());
+#ifdef __linux__
+            fprintf(stderr, "[UE4SS] start_mod: '%s' make_main_state() done.\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
+            fprintf(stderr, "[UE4SS] start_mod: '%s' calling setup_lua_global_functions_main_state_only()...\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
+#endif
             setup_lua_global_functions_main_state_only();
+#ifdef __linux__
+            fprintf(stderr, "[UE4SS] start_mod: '%s' setup_lua_global_functions_main_state_only() done.\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
+            fprintf(stderr, "[UE4SS] start_mod: '%s' calling make_async_state()...\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
+#endif
             make_async_state(this, lua());
+#ifdef __linux__
+            fprintf(stderr, "[UE4SS] start_mod: '%s' make_async_state() done.\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
+            fprintf(stderr, "[UE4SS] start_mod: '%s' calling start_async_thread()...\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
+#endif
             start_async_thread();
+#ifdef __linux__
+            fprintf(stderr, "[UE4SS] start_mod: '%s' start_async_thread() done.\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
+#endif
 
             m_is_started = true;
             fire_on_lua_start_for_cpp_mods();
 
+#ifdef __linux__
+            fprintf(stderr, "[UE4SS] start_mod: '%s' calling setup_custom_module_loader()...\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
+#endif
             // Set up the custom module loader for handling UTF-8 paths
             setup_custom_module_loader(main_lua());
+#ifdef __linux__
+            fprintf(stderr, "[UE4SS] start_mod: '%s' setup_custom_module_loader() done.\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
+#endif
 
             // Use the scripts path that was already determined in the constructor
             std::filesystem::path main_script_path = m_scripts_path / STR("main.lua");
 
+#ifdef __linux__
+            fprintf(stderr, "[UE4SS] start_mod: '%s' main_script_path='%s' exists=%d\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str(), main_script_path.string().c_str(), (int)std::filesystem::exists(main_script_path));
+#endif
+
             if (std::filesystem::exists(main_script_path))
             {
+#ifdef __linux__
+                fprintf(stderr, "[UE4SS] start_mod: '%s' calling load_and_execute_script()...\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
+#endif
                 if (!load_and_execute_script(main_script_path))
                 {
                     Output::send<LogLevel::Error>(STR("Failed to execute main script: {}\n"), ensure_str(main_script_path));
                 }
+#ifdef __linux__
+                fprintf(stderr, "[UE4SS] start_mod: '%s' load_and_execute_script() done.\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
+#endif
             }
             else
             {
@@ -5928,6 +5972,9 @@ Overloads:
                         STR("Main script 'main.lua' not found in scripts directory: {} -- Ensure your script file uses the correct casing.\n"),
                         ensure_str(m_scripts_path));
             }
+#ifdef __linux__
+            fprintf(stderr, "[UE4SS] start_mod: '%s' completed successfully.\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
+#endif
         }
         catch (const std::exception& e)
         {
