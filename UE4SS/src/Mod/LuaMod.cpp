@@ -5564,6 +5564,18 @@ Overloads:
 
     auto static setup_lua_classes_internal(const LuaMadeSimple::Lua& lua) -> void
     {
+#ifdef __linux__
+        fprintf(stderr, "[UE4SS] setup_lua_classes_internal: starting...\n");
+        // FText::StaticSize_Private is never set on Linux (set during TypeChecker scanning which is skipped).
+        // Without this, FText's copy constructor throws std::runtime_error from FText::StaticSize().
+        // Set it to sizeof(FText) as a fallback.
+        if (Unreal::FText::StaticSize_Private < 0)
+        {
+            Unreal::FText::StaticSize_Private = sizeof(Unreal::FText);
+            fprintf(stderr, "[UE4SS] setup_lua_classes_internal: set FText::StaticSize_Private = %d (fallback)\n", (int)Unreal::FText::StaticSize_Private);
+        }
+#endif
+
         // UE4SS Class -> START
         auto mod_class = lua.prepare_new_table();
         mod_class.set_has_userdata(false);
@@ -5647,6 +5659,9 @@ Overloads:
         });
         unreal_version_class.make_global("UnrealVersion");
         // UnrealVersion Class -> END
+#ifdef __linux__
+        fprintf(stderr, "[UE4SS] setup_lua_classes_internal: UE4SS + UnrealVersion classes done.\n");
+#endif
 
         // FName Class -> START
         // Pre-load the global FName table
@@ -5656,6 +5671,9 @@ Overloads:
         LuaType::FName::construct(lua, Unreal::NAME_None);
         lua_setglobal(lua.get_lua_state(), "NAME_None");
         // FName Class -> END
+#ifdef __linux__
+        fprintf(stderr, "[UE4SS] setup_lua_classes_internal: FName class done.\n");
+#endif
 
         // FText Class -> START
         // Pre-load the global FText table
@@ -5663,6 +5681,9 @@ Overloads:
         LuaType::FText::construct(lua, Unreal::FText());
         lua_setglobal(lua.get_lua_state(), "FText");
         // FText Class -> END
+#ifdef __linux__
+        fprintf(stderr, "[UE4SS] setup_lua_classes_internal: FText class done.\n");
+#endif
 
         // FString Class -> START
         // Pre-load the global FString constructor
@@ -5749,6 +5770,9 @@ Overloads:
 
         package_name.make_global("FPackageName");
         // FPackageName -> END
+#ifdef __linux__
+        fprintf(stderr, "[UE4SS] setup_lua_classes_internal: all classes done.\n");
+#endif
     }
 
     auto LuaMod::setup_lua_classes(const LuaMadeSimple::Lua& lua) const -> void
