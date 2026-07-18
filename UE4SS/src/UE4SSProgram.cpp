@@ -1277,12 +1277,12 @@ namespace RC
             fprintf(stderr, "[UE4SS] Linux: calling install_lua_mods()...\n");
             install_lua_mods();
             fprintf(stderr, "[UE4SS] Linux: install_lua_mods() done.\n");
-            fprintf(stderr, "[UE4SS] Linux: calling LuaMod::on_program_start()...\n");
-            LuaMod::on_program_start();
-            fprintf(stderr, "[UE4SS] Linux: LuaMod::on_program_start() done.\n");
-            fprintf(stderr, "[UE4SS] Linux: calling fire_program_start_for_cpp_mods()...\n");
-            fire_program_start_for_cpp_mods();
-            fprintf(stderr, "[UE4SS] Linux: fire_program_start_for_cpp_mods() done.\n");
+            // Skip LuaMod::on_program_start() — it calls UObjectArray::AddUObjectDeleteListener
+            // and registers UE hooks (LoadMap, InitGameState, BeginPlay, etc.) which all
+            // require resolved function addresses that we don't have on Linux.
+            fprintf(stderr, "[UE4SS] Linux: skipping LuaMod::on_program_start() (requires UE hooks)\n");
+            // Skip fire_program_start_for_cpp_mods() — C++ mods' on_program_start() may also access UE functions
+            fprintf(stderr, "[UE4SS] Linux: skipping fire_program_start_for_cpp_mods() (requires UE functions)\n");
             fprintf(stderr, "[UE4SS] Linux: calling start_lua_mods()...\n");
             start_lua_mods();
             fprintf(stderr, "[UE4SS] Linux: start_lua_mods() done.\n");
