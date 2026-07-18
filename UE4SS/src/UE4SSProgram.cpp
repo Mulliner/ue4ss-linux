@@ -252,6 +252,36 @@ namespace RC
                 }
             }
 
+            // Auto-create Mods directory and mods.txt early (before init() which may crash)
+            {
+                auto mods_dir = m_working_directory / "Mods";
+                if (!std::filesystem::exists(mods_dir))
+                {
+                    std::error_code ec;
+                    std::filesystem::create_directories(mods_dir, ec);
+                    if (!ec)
+                    {
+                        Output::send(STR("Created mods directory: {}\n"), ensure_str(mods_dir));
+                    }
+                }
+
+                auto mods_txt_path = mods_dir / "mods.txt";
+                if (!std::filesystem::exists(mods_txt_path))
+                {
+                    std::ofstream mods_txt(mods_txt_path);
+                    if (mods_txt.is_open())
+                    {
+                        mods_txt << "; Lines starting with ';' are comments\n";
+                        mods_txt << "; Add mod folder names here (one per line) to enable them\n";
+                        mods_txt << "; Prefix with ';' to disable a mod\n";
+                        mods_txt << "; Example:\n";
+                        mods_txt << "; MyLuaMod\n";
+                        mods_txt.close();
+                        Output::send(STR("Created default mods.txt: {}\n"), ensure_str(mods_txt_path));
+                    }
+                }
+            }
+
             try
             {
                 settings_manager.deserialize(m_settings_path_and_file);
@@ -612,34 +642,6 @@ namespace RC
         }
 
         insert_mods_directory(default_mods_path, 0);
-
-        // Auto-create the primary mods directory if it doesn't exist
-        if (!std::filesystem::exists(default_mods_path))
-        {
-            std::error_code ec;
-            std::filesystem::create_directories(default_mods_path, ec);
-            if (!ec)
-            {
-                Output::send(STR("Created mods directory: {}\n"), ensure_str(default_mods_path));
-            }
-        }
-
-        // Auto-create a default mods.txt if it doesn't exist in the primary mods directory
-        auto mods_txt_path = default_mods_path / "mods.txt";
-        if (!std::filesystem::exists(mods_txt_path))
-        {
-            std::ofstream mods_txt(mods_txt_path);
-            if (mods_txt.is_open())
-            {
-                mods_txt << "; Lines starting with ';' are comments\n";
-                mods_txt << "; Add mod folder names here (one per line) to enable them\n";
-                mods_txt << "; Prefix with ';' to disable a mod\n";
-                mods_txt << "; Example:\n";
-                mods_txt << "; MyLuaMod\n";
-                mods_txt.close();
-                Output::send(STR("Created default mods.txt: {}\n"), ensure_str(mods_txt_path));
-            }
-        }
 
         for (const auto& path : m_mods_directories_to_remove)
         {
