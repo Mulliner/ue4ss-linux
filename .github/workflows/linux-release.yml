@@ -59,6 +59,7 @@ jobs:
           done
 
       - name: Create new release
+        id: create_release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -66,9 +67,23 @@ jobs:
           SHORT_SHA=$(git rev-parse --short HEAD)
           # Get current date
           DATE=$(date +'%Y-%m-%d')
+          TAG="v${DATE}-${SHORT_SHA}"
           # Create release with the build zip
-          gh release create "v${DATE}-${SHORT_SHA}" \
+          gh release create "$TAG" \
             --repo ${{ github.repository }} \
             --title "UE4SS Linux Build - ${DATE}" \
             --notes "Automated build from commit ${SHORT_SHA}" \
             UE4SS-Linux-build.zip
+          # Save the release URL for Discord notification
+          RELEASE_URL=$(gh release view "$TAG" --repo ${{ github.repository }} --json url --jq '.url')
+          echo "release_url=$RELEASE_URL" >> $GITHUB_OUTPUT
+          echo "release_tag=$TAG" >> $GITHUB_OUTPUT
+
+      - name: Notify Discord
+        run: |
+          RELEASE_URL="${{ steps.create_release.outputs.release_url }}"
+          RELEASE_TAG="${{ steps.create_release.outputs.release_tag }}"
+          curl -H "Content-Type: application/json" \
+            -X POST \
+            -d "{\"content\": \"**UE4SS Linux Build Released**\\nTag: ${RELEASE_TAG}\\nDownload: ${RELEASE_URL}\\n\\nThe zip file contains libUE4SS.so ready for deployment.\"}" \
+            "https://discord.com/api/webhooks/1528289013381992468/Ow5rDFLrQ-hIOQ2HLDJGiQUmGFh3w85GG8QSDttDZ90kuXiiZ9v874K827bTrpgAW-Wx"
