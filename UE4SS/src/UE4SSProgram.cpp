@@ -1505,7 +1505,11 @@ namespace RC
             {
                 if (dynamic_cast<CppMod*>(mod.get()))
                 {
+#ifdef __linux__
+                    filesystem_watcher.add_dir(mod->get_path() / "libs");
+#else
                     filesystem_watcher.add_dir(mod->get_path() / "dlls");
+#endif
                 }
                 else if (dynamic_cast<LuaMod*>(mod.get()))
                 {
@@ -1520,7 +1524,11 @@ namespace RC
                 ScopedThreadSynchronizer thread_synchronizer{filesystem_watcher.get_thread_state()};
                 const auto mod_name = file.parent_path().filename();
                 auto dir_name = file.filename().string();
+#ifdef __linux__
+                const auto is_cpp_mod = String::iequal(dir_name, "libs");
+#else
                 const auto is_cpp_mod = String::iequal(dir_name, "dlls");
+#endif
                 if (is_cpp_mod)
                 {
                     auto staged_file = file / mod_name;
@@ -1715,12 +1723,16 @@ namespace RC
                     auto mod_name = ensure_str(sub_directory.path().stem());
 #ifdef __linux__
                     fprintf(stderr, "[UE4SS] setup_mods: found directory '%s' (full path: %s)\n", std::string(mod_name.begin(), mod_name.end()).c_str(), sub_directory.path().string().c_str());
-                    fprintf(stderr, "[UE4SS] setup_mods: has scripts/ = %s, has dlls/ = %s\n", std::filesystem::exists(sub_directory.path() / "scripts") ? "yes" : "no", std::filesystem::exists(sub_directory.path() / "dlls") ? "yes" : "no");
+                    fprintf(stderr, "[UE4SS] setup_mods: has scripts/ = %s, has libs/ = %s\n", std::filesystem::exists(sub_directory.path() / "scripts") ? "yes" : "no", std::filesystem::exists(sub_directory.path() / "libs") ? "yes" : "no");
 #endif
                     // Create the mod but don't install it yet
                     if (!find_mod_by_name<LuaMod>(mod_name) && std::filesystem::exists(sub_directory.path() / "scripts"))
                         m_mods.emplace_back(std::make_unique<LuaMod>(*this, std::move(mod_name), ensure_str(sub_directory.path())));
+#ifdef __linux__
+                    if (!find_mod_by_name<CppMod>(mod_name) && std::filesystem::exists(sub_directory.path() / "libs"))
+#else
                     if (!find_mod_by_name<CppMod>(mod_name) && std::filesystem::exists(sub_directory.path() / "dlls"))
+#endif
                         m_mods.emplace_back(std::make_unique<CppMod>(*this, std::move(mod_name), ensure_str(sub_directory.path())));
                 }
             }
