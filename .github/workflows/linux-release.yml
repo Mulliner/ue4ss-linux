@@ -68,22 +68,48 @@ jobs:
           # Get current date
           DATE=$(date +'%Y-%m-%d')
           TAG="v${DATE}-${SHORT_SHA}"
-          # Create release with the build zip
+          # Extract latest changelog section (from first ## to the next --- or EOF)
+          CHANGELOG=$(awk '/^## /{found=1} found{print} /^---/{if(found)exit}' CHANGELOG.md | head -50)
+          # Create release with the build zip and changelog as notes
           gh release create "$TAG" \
             --repo ${{ github.repository }} \
             --title "UE4SS Linux Build - ${DATE}" \
-            --notes "Automated build from commit ${SHORT_SHA}" \
+            --notes "${CHANGELOG}" \
             UE4SS-Linux-build.zip
           # Save the release URL for Discord notification
           RELEASE_URL=$(gh release view "$TAG" --repo ${{ github.repository }} --json url --jq '.url')
           echo "release_url=$RELEASE_URL" >> $GITHUB_OUTPUT
           echo "release_tag=$TAG" >> $GITHUB_OUTPUT
+          echo "release_date=$DATE" >> $GITHUB_OUTPUT
 
       - name: Notify Discord
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: |
           RELEASE_URL="${{ steps.create_release.outputs.release_url }}"
           RELEASE_TAG="${{ steps.create_release.outputs.release_tag }}"
+          RELEASE_DATE="${{ steps.create_release.outputs.release_date }}"
+          # Extract latest changelog section for Discord
+          CHANGELOG=$(awk '/^## /{found=1} found{print} /^---/{if(found)exit}' CHANGELOG.md | head -40)
+          # Build JSON payload with embed
+          PAYLOAD=$(jq -n \
+            --arg url "$RELEASE_URL" \
+            --arg tag "$RELEASE_TAG" \
+            --arg date "$RELEASE_DATE" \
+            --arg changelog "$CHANGELOG" \
+            '{
+              embeds: [{
+                title: ("UE4SS Linux Build Released — " + $tag),
+                description: $changelog,
+                color: 5814783,
+                fields: [
+                  {name: "Download", value: $url, inline: false}
+                ],
+                footer: {text: ("Build date: " + $date)},
+                timestamp: (now | todateiso8601)
+              }]
+            }')
           curl -H "Content-Type: application/json" \
             -X POST \
-            -d "{\"content\": \"**UE4SS Linux Build Released**\\nTag: ${RELEASE_TAG}\\nDownload: ${RELEASE_URL}\\n\\nThe zip file contains libUE4SS.so ready for deployment.\"}" \
-            "https://discord.com/api/webhooks/1528289013381992468/Ow5rDFLrQ-hIOQ2HLDJGiQUmGFh3w85GG8QSDttDZ90kuXiiZ9v874K827bTrpgAW-Wx"
+            -d "$PAYLOAD" \
+            "$DISCORD_WEBHOOK_URL"
