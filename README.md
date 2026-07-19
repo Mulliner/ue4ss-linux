@@ -129,6 +129,13 @@ UE4SS has per-mod crash recovery. If a mod crashes, you will see:
 ```
 Other mods will continue to load normally.
 
+## AMP Server Setup
+
+If you run your dedicated server through an AMP control panel, AMP overwrites the
+server binary on every game update, which breaks the `LD_PRELOAD` setup. See
+[docs/AMP-Setup.md](docs/AMP-Setup.md) for a wrapper-script + cronjob solution
+that survives AMP updates.
+
 ## Changelog
 
 See [CHANGELOG.md](CHANGELOG.md) for the full changelog.
