@@ -9,6 +9,9 @@ on:
 permissions:
   contents: write
 
+env:
+  RELEASES_REPO: XarminaEu/ue4ss-linux-releases
+
 jobs:
   build-and-release:
     name: Build and Release libUE4SS.so
@@ -48,36 +51,48 @@ jobs:
           cp build_linux/Game__Shipping__Linux64/lib/libUE4SS.so release/
           cd release && zip -r ../UE4SS-Linux-build.zip libUE4SS.so
 
+      - name: Checkout releases repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.RELEASES_REPO }}
+          path: releases-repo
+          token: ${{ secrets.RELEASES_PAT }}
+
+      - name: Sync README and CHANGELOG to releases repo
+        run: |
+          cp README.md releases-repo/README.md
+          cp CHANGELOG.md releases-repo/CHANGELOG.md
+          cd releases-repo
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git add README.md CHANGELOG.md
+          git diff --staged --quiet || git commit -m "Update README and CHANGELOG"
+          git push
+
       - name: Delete old releases
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.RELEASES_PAT }}
         run: |
-          # Get all releases and delete them
-          gh release list --repo ${{ github.repository }} --json tagName --jq '.[].tagName' | while read -r tag; do
+          gh release list --repo ${{ env.RELEASES_REPO }} --json tagName --jq '.[].tagName' | while read -r tag; do
             echo "Deleting release with tag: $tag"
-            gh release delete "$tag" --repo ${{ github.repository }} --yes --cleanup-tag
+            gh release delete "$tag" --repo ${{ env.RELEASES_REPO }} --yes --cleanup-tag
           done
 
       - name: Create new release
         id: create_release
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.RELEASES_PAT }}
         run: |
-          # Get short commit hash
           SHORT_SHA=$(git rev-parse --short HEAD)
-          # Get current date
           DATE=$(date +'%Y-%m-%d')
           TAG="v${DATE}-${SHORT_SHA}"
-          # Extract latest changelog section (from first ## to the next --- or EOF)
           CHANGELOG=$(awk '/^## /{found=1} found{print} /^---/{if(found)exit}' CHANGELOG.md | head -50)
-          # Create release with the build zip and changelog as notes
           gh release create "$TAG" \
-            --repo ${{ github.repository }} \
+            --repo ${{ env.RELEASES_REPO }} \
             --title "UE4SS Linux Build - ${DATE}" \
             --notes "${CHANGELOG}" \
             UE4SS-Linux-build.zip
-          # Save the release URL for Discord notification
-          RELEASE_URL=$(gh release view "$TAG" --repo ${{ github.repository }} --json url --jq '.url')
+          RELEASE_URL=$(gh release view "$TAG" --repo ${{ env.RELEASES_REPO }} --json url --jq '.url')
           echo "release_url=$RELEASE_URL" >> $GITHUB_OUTPUT
           echo "release_tag=$TAG" >> $GITHUB_OUTPUT
           echo "release_date=$DATE" >> $GITHUB_OUTPUT
@@ -89,9 +104,7 @@ jobs:
           RELEASE_URL="${{ steps.create_release.outputs.release_url }}"
           RELEASE_TAG="${{ steps.create_release.outputs.release_tag }}"
           RELEASE_DATE="${{ steps.create_release.outputs.release_date }}"
-          # Extract latest changelog section for Discord
           CHANGELOG=$(awk '/^## /{found=1} found{print} /^---/{if(found)exit}' CHANGELOG.md | head -40)
-          # Build JSON payload with embed
           PAYLOAD=$(jq -n \
             --arg url "$RELEASE_URL" \
             --arg tag "$RELEASE_TAG" \
