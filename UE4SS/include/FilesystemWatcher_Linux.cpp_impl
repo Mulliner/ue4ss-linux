@@ -19,15 +19,18 @@ namespace RC
 
     auto init_filesystem_watcher(FilesystemWatcher& watcher, const std::filesystem::path& path) -> void
     {
-        watcher.m_paths.push_back(path);
-        auto handle = inotify_init1(IN_NONBLOCK);
-        watcher.m_handle = reinterpret_cast<void*>(handle);
-        auto file_descriptor = handle;
-        if (file_descriptor == -1)
+        // Create inotify fd only once; reuse for all watches
+        if (!watcher.m_handle)
         {
-            Output::send<LogLevel::Error>(STR("Error watching '{}': {}"), ensure_str(path.string()), ensure_str(std::strerror(errno)));
-            return;
+            auto handle = inotify_init1(IN_NONBLOCK);
+            watcher.m_handle = reinterpret_cast<void*>(handle);
+            if (handle == -1)
+            {
+                Output::send<LogLevel::Error>(STR("Error initializing inotify: {}"), ensure_str(std::strerror(errno)));
+                return;
+            }
         }
+        auto file_descriptor = handle_to_fd(watcher.m_handle);
         if (inotify_add_watch(file_descriptor, path.c_str(), IN_CREATE) == -1)
         {
             Output::send<LogLevel::Error>(STR("Error watching '{}': {}"), ensure_str(path.string()), ensure_str(std::strerror(errno)));
@@ -52,40 +55,30 @@ namespace RC
     {
         while (!stop_token.stop_requested())
         {
-            pollfd file_descriptors[2]{};
-            file_descriptors[0].fd = STDIN_FILENO;
+            pollfd file_descriptors[1]{};
+            file_descriptors[0].fd = handle_to_fd(m_handle);
             file_descriptors[0].events = POLLIN;
-            file_descriptors[1].fd = handle_to_fd(m_handle);
-            file_descriptors[1].events = POLLIN;
 
-            auto poll_num = ::poll(file_descriptors, 2, s_polling_timeout_ms);
-            if (poll_num == 0 && stop_token.stop_requested())
+            auto poll_num = ::poll(file_descriptors, 1, s_polling_timeout_ms);
+            if (poll_num == 0)
             {
-                break;
+                continue;
             }
             else if (poll_num == -1)
             {
                 if (errno == EINTR)
                 {
-                    return;
+                    continue;
                 }
                 else
                 {
-                    Output::send<LogLevel::Error>(STR("Error: {}"), ensure_str(std::strerror(errno)));
-                    std::exit(EXIT_FAILURE);
+                    Output::send<LogLevel::Error>(STR("FilesystemWatcher poll error: {}"), ensure_str(std::strerror(errno)));
+                    break;
                 }
             }
             else if (poll_num > 0)
             {
                 if (file_descriptors[0].revents & POLLIN)
-                {
-                    char buffer{};
-                    while (read(STDIN_FILENO, &buffer, 1) > 0 && buffer != '\n')
-                    {
-                        continue;
-                    }
-                }
-                if (file_descriptors[1].revents & POLLIN)
                 {
                     while (true)
                     {
@@ -94,8 +87,8 @@ namespace RC
                         auto length = read(handle_to_fd(m_handle), buffer, sizeof(buffer));
                         if (length == -1 && errno != EAGAIN)
                         {
-                            Output::send<LogLevel::Error>(STR("Error: {}"), ensure_str(std::strerror(errno)));
-                            std::exit(EXIT_FAILURE);
+                            Output::send<LogLevel::Error>(STR("FilesystemWatcher read error: {}"), ensure_str(std::strerror(errno)));
+                            break;
                         }
                         else if (length <= 0)
                         {

@@ -1,0 +1,74 @@
+name: Linux Release
+
+on:
+  push:
+    branches:
+      - linux-native
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    name: Build and Release libUE4SS.so
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build gcc g++ libfmt-dev
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Configure CMake (Linux Native)
+        run: |
+          cmake -B build_linux \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Game__Shipping__Linux64 \
+            -DUE4SS_GUI_ENABLED=OFF \
+            -DUE4SS_INPUT_ENABLED=OFF \
+            -DUE4SS_PROFILERS=OFF
+
+      - name: Build UE4SS
+        run: |
+          cmake --build build_linux --target UE4SS
+
+      - name: Package build
+        run: |
+          mkdir -p release
+          cp build_linux/Game__Shipping__Linux64/lib/libUE4SS.so release/
+          cd release && zip -r ../UE4SS-Linux-build.zip libUE4SS.so
+
+      - name: Delete old releases
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Get all releases and delete them
+          gh release list --repo ${{ github.repository }} --json tagName --jq '.[].tagName' | while read -r tag; do
+            echo "Deleting release with tag: $tag"
+            gh release delete "$tag" --repo ${{ github.repository }} --yes --cleanup-tag
+          done
+
+      - name: Create new release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Get short commit hash
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          # Get current date
+          DATE=$(date +'%Y-%m-%d')
+          # Create release with the build zip
+          gh release create "v${DATE}-${SHORT_SHA}" \
+            --repo ${{ github.repository }} \
+            --title "UE4SS Linux Build - ${DATE}" \
+            --notes "Automated build from commit ${SHORT_SHA}" \
+            UE4SS-Linux-build.zip

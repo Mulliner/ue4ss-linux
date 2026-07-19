@@ -1,4 +1,20 @@
-# UE4SS Linux Port - Changelog
+# UE4SS Linux Native Port - Changelog
+
+## v3.0.2 - Bug Fixes (2026-07-19)
+
+### Bug Fixes
+- **FText crash fix**: Fixed SIGSEGV in `setup_lua_classes_internal` caused by `FText::StaticSize_Private` being uninitialized on Linux (set to `sizeof(FText)` as fallback)
+- **FilesystemWatcher path fix**: Fixed empty paths being passed to `inotify_add_watch` due to `u16string_view` to `filesystem::path` conversion issues — now uses `mod->get_path()` directly
+- **FilesystemWatcher inotify fd leak**: Fixed inotify file descriptor being overwritten on each path — now creates fd only once and reuses for all watches
+- **FilesystemWatcher poll fix**: Removed unnecessary STDIN polling that consumed server input; replaced `std::exit(EXIT_FAILURE)` with graceful error handling
+- **Case sensitivity fix**: Use lowercase `scripts` directory on Linux (case-sensitive filesystems)
+- **Per-mod crash recovery**: SIGSEGV in one mod no longer prevents subsequent mods from loading — each mod is wrapped in `sigsetjmp`/`siglongjmp` recovery
+
+### Improvements
+- Added granular stderr logging during mod startup on Linux for debugging
+- Settings manager uses hardcoded defaults on Linux when INI file is not present
+
+---
 
 ## v3.0.1 - Linux Native Build (2026-07-18)
 
