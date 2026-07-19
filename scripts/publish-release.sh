@@ -74,16 +74,18 @@ gh repo clone "$BUILDS_REPO" "$BUILDS_REPO_DIR" -- --quiet
 
 cp README.md "$BUILDS_REPO_DIR/README.md"
 cp CHANGELOG.md "$BUILDS_REPO_DIR/CHANGELOG.md"
+mkdir -p "$BUILDS_REPO_DIR/docs"
+cp -r docs/. "$BUILDS_REPO_DIR/docs/"
 (
     cd "$BUILDS_REPO_DIR"
     git config user.name "UE4SS Release Publisher"
     git config user.email "release-publisher@local"
-    git add README.md CHANGELOG.md
+    git add README.md CHANGELOG.md docs
     if ! git diff --staged --quiet; then
-        git commit -m "Update README and CHANGELOG (${TAG})"
+        git commit -m "Update README, CHANGELOG and docs (${TAG})"
         git push
     else
-        echo "No README/CHANGELOG changes to push."
+        echo "No README/CHANGELOG/docs changes to push."
     fi
 )
 
