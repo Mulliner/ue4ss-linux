@@ -84,3 +84,7 @@ xwin/*
 build_linux/
 build_linux_test/
 build_win_test/
+
+# Release publishing (scripts/publish-release.sh)
+.builds-repo-checkout/
+UE4SS-Linux-build.zip
