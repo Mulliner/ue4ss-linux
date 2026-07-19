@@ -17,9 +17,9 @@ The `.so` must be located in the same directory as the server binary:
 <AMP-Instance>/palworld/2394010/Pal/Binaries/Linux/libUE4SS.so
 ```
 
-Example for Lunaris01:
+Example for an instance named `MyServer01`:
 ```
-/home/amp/.ampdata/instances/Lunaris01/palworld/2394010/Pal/Binaries/Linux/libUE4SS.so
+/home/amp/.ampdata/instances/MyServer01/palworld/2394010/Pal/Binaries/Linux/libUE4SS.so
 ```
 
 ### Step 2: Create UE4SS-settings.ini
@@ -73,7 +73,7 @@ HookEndPlay=false
 The original binary is renamed and replaced with a wrapper script:
 
 ```bash
-cd /home/amp/.ampdata/instances/Lunaris01/palworld/2394010/Pal/Binaries/Linux
+cd /home/amp/.ampdata/instances/<YourInstanceName>/palworld/2394010/Pal/Binaries/Linux
 
 # Rename the original binary (only if it's still an ELF, not already a script)
 file PalServer-Linux-Shipping | grep -q ELF && mv PalServer-Linux-Shipping PalServer-Linux-Shipping.real
