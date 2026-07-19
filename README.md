@@ -2,6 +2,26 @@
 
 A native Linux build of UE4SS (Unreal Engine 4/5 Scripting System) for dedicated game servers running on Linux. This port enables Lua mod loading and scripting on Linux dedicated servers without requiring Windows.
 
+> ## ⚠️ IMPORTANT: Plugin File Format on Linux
+>
+> **This is a Linux build. It CANNOT load Windows `.dll` files.** Any mod or plugin
+> you install must be provided in the **native Linux formats** listed below. If a mod
+> author only ships `.dll` files, that mod **will not work** on this Linux build —
+> there is no `.dll`-to-`.so` compatibility layer, emulation, or shim of any kind.
+>
+> | Mod Type | Windows Format | **Required Linux Format** |
+> |----------|-----------------|----------------------------|
+> | Lua mods | `scripts/main.lua` | `scripts/main.lua` — **identical, no changes needed** (Lua is script-based and platform-independent) |
+> | C++ mods | `dlls/main.dll` | `libs/main.so` — **must be a natively compiled Linux shared object (`.so`), not a `.dll`** |
+>
+> **Key points to remember:**
+> - The mod folder for C++ mods on Linux is called **`libs/`**, not `dlls/` (this is different from Windows!).
+> - A C++ mod must be **recompiled from source specifically for Linux** (e.g. with GCC or Clang, producing an ELF `.so` file). Simply renaming a `.dll` to `.so` will **not** work — the internal binary format is completely different.
+> - Directory names inside a mod folder are **case-sensitive** on Linux (`scripts`, `libs` — always lowercase), unlike Windows where case does not matter.
+> - If your mod only provides a `dlls/` folder with a `.dll` inside, UE4SS will **not detect or load it at all** on Linux — you will need the mod author (or yourself, if you have the source) to produce a Linux `.so` build.
+>
+> **In short: Lua mods just work as-is. C++ mods must be a Linux-native `.so` file inside a `libs/` folder — never a `.dll`.**
+
 ## Features
 
 - **Lua Mod Loading**: Load and run Lua-based mods on Linux dedicated servers
