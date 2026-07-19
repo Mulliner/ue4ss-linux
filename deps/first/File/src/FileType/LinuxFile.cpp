@@ -279,8 +279,9 @@ namespace RC::File
     {
         if (m_memory_map)
         {
-            munmap(m_memory_map, 0);
+            munmap(m_memory_map, m_memory_map_size);
             m_memory_map = nullptr;
+            m_memory_map_size = 0;
         }
 
         if (m_map_handle)
@@ -416,6 +417,7 @@ namespace RC::File
             m_memory_map = nullptr;
             THROW_INTERNAL_FILE_ERROR(fmt::format("[LinuxFile::memory_map] mmap failed: {}", SysError(errno).str()))
         }
+        m_memory_map_size = file_size;
 
         return std::span(m_memory_map, file_size);
     }

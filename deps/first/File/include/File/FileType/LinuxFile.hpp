@@ -35,6 +35,7 @@ namespace RC::File
         HANDLE m_file{};
         HANDLE m_map_handle{};
         uint8_t* m_memory_map{};
+        size_t m_memory_map_size{};
         OpenProperties m_open_properties{};
         std::filesystem::path m_file_path_and_name{};
         std::filesystem::path m_serialization_file_path_and_name{};

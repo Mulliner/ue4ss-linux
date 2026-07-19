@@ -116,7 +116,9 @@ static auto wait_for_game_ready() -> void
     }
 }
 
-// Check if this process is the game server (not a helper like crashpad_handler)
+// Check if this process is the game server (not a helper like crashpad_handler,
+// and not an unrelated utility process that happened to inherit LD_PRELOAD from
+// the environment, e.g. 'tail', 'cat', health-check scripts, etc.)
 static auto is_game_process() -> bool
 {
     char exe_path_buffer[1024]{};
@@ -140,13 +142,34 @@ static auto is_game_process() -> bool
         exe_name.find("crash_reporter") != std::string::npos ||
         exe_name.find("EpicServices") != std::string::npos ||
         exe_name == "dash" || exe_name == "bash" || exe_name == "sh" ||
-        exe_name == "zsh" || exe_name == "csh" || exe_name == "ksh")
+        exe_name == "zsh" || exe_name == "csh" || exe_name == "ksh" ||
+        exe_name == "env" || exe_name == "tail" || exe_name == "cat" ||
+        exe_name == "grep" || exe_name == "sed" || exe_name == "awk" ||
+        exe_name == "sleep" || exe_name == "watch" || exe_name == "tee")
     {
         fprintf(stderr, "[UE4SS] Skipping non-game process: %s\n", exe_path.c_str());
         return false;
     }
 
-    fprintf(stderr, "[UE4SS] Detected game executable: %s\n", exe_path.c_str());
+    // LD_PRELOAD can leak into unrelated tooling that inherits the environment
+    // (e.g. log tailing helpers used by server control panels). Real UE4/5
+    // Linux shipping binaries are always very large (tens to hundreds of MB),
+    // so anything suspiciously small cannot be the actual game and must be
+    // rejected even if its name isn't in the denylist above.
+    constexpr uintmax_t minimum_expected_game_binary_size = 10ull * 1024 * 1024; // 10 MB
+    std::error_code ec{};
+    uintmax_t exe_size = std::filesystem::file_size(exe_path, ec);
+    if (ec || exe_size < minimum_expected_game_binary_size)
+    {
+        fprintf(stderr,
+                "[UE4SS] Skipping process, binary too small to be the game (%s, %llu bytes): %s\n",
+                ec ? "stat failed" : "size check",
+                static_cast<unsigned long long>(exe_size),
+                exe_path.c_str());
+        return false;
+    }
+
+    fprintf(stderr, "[UE4SS] Detected game executable: %s (%llu bytes)\n", exe_path.c_str(), static_cast<unsigned long long>(exe_size));
     return true;
 }
 
