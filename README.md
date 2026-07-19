@@ -163,3 +163,11 @@ See [CHANGELOG.md](CHANGELOG.md) for the full changelog.
 ## Downloads
 
 Download the latest build from the [Releases page](https://github.com/XarminaEu/ue4ss-linux/releases/latest). Old releases are replaced with each new build.
+
+## Support This Project
+
+If this Linux port has been useful to you, consider supporting further development:
+
+[![Donate](https://img.shields.io/badge/Donate-Stripe-blueviolet?logo=stripe&logoColor=white)](https://buy.stripe.com/8x26oJ2yv1Z3gRE40T5EY00)
+
+**[💜 Donate via Stripe](https://buy.stripe.com/8x26oJ2yv1Z3gRE40T5EY00)**
