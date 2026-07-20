@@ -74,9 +74,9 @@ jobs:
           echo "Found: $SO_FILE"
           ls -lh "$SO_FILE"
           # Strip debug symbols
-          cp "$SO_FILE" release/libUE4SS-linux-x64.so
-          strip --strip-debug release/libUE4SS-linux-x64.so
-          ls -lh release/libUE4SS-linux-x64.so
+          cp "$SO_FILE" release/libUE4SS.so
+          strip --strip-debug release/libUE4SS.so
+          ls -lh release/libUE4SS.so
           # Generate build info
           cat > release/BUILD_INFO.txt << EOF
           UE4SS Linux Native Build
@@ -123,12 +123,12 @@ jobs:
             - Profilers: Disabled
 
             ### Artifacts
-            - `libUE4SS-linux-x64.so` — Stripped shared library
+            - `libUE4SS.so` — Stripped shared library
             - `BUILD_INFO.txt` — Build metadata
 
             ### Usage
             ```bash
-            LD_PRELOAD=./libUE4SS-linux-x64.so ./YourGameBinary
+            LD_PRELOAD=./libUE4SS.so ./YourGameBinary
             ```
 
             ### Compatibility
@@ -136,5 +136,5 @@ jobs:
             - Requires: libGL, libEGL, libX11, libXrandr, libXinerama, libXcursor, libXi
             - Engine Tick Hook: Auto-detected via dlsym (or manual override in UE4SS_Addresses.ini)
           files: |
-            release/libUE4SS-linux-x64.so
+            release/libUE4SS.so
             release/BUILD_INFO.txt
