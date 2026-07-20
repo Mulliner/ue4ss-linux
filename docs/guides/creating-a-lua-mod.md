@@ -14,20 +14,20 @@ Let's call it `MyLuaMod` for the purpose of this example.
 In order to be loaded and executed:
 1) The mod folder must have a `scripts` subfolder and a `main.lua` file inside, so it looks like:
 ```
-Mods\
+Mods/
     ...
-    MyLuaMod\
-        scripts\
+    MyLuaMod/
+        scripts/
             main.lua
     ...
 ```
 
-2) The `Mods\MyLuaMod\scripts\main.lua` file has some Lua code inside it, e.g.:
+2) The `Mods/MyLuaMod/scripts/main.lua` file has some Lua code inside it, e.g.:
 ```lua
 print("[MyLuaMod] Mod loaded\n")
 ```
 
-3) The mod must be added and enabled in `Mods\mods.txt` with a new line containing the name of your mod folder (name of your mod) and `1` for enabling or `0` for disabling the mod:
+3) The mod must be added and enabled in `Mods/mods.txt` with a new line containing the name of your mod folder (name of your mod) and `1` for enabling or `0` for disabling the mod:
 ```
 ...
 MyLuaMod : 1
@@ -46,8 +46,8 @@ Basically, you are doing the exact same thing that an Unreal Engine game develop
 If you need to create an object of a structure-like class, e.g. `FVector`, in order to pass it into a Unreal Engine function, UE4SS allows you to pass a Lua table with the fields of the class like `{X=1.0, Y=2.0, Z=3.0}` instead.
 
 ### Using Lua C libraries
-If you ever need to load Lua C libraries, that have native code (i.e. with DLLs on Windows), 
-you can place these DLLs directly inside the same `\scripts\` folder.
+If you ever need to load Lua C libraries, that have native code (i.e. with `.so` files on Linux or `.dll` files on Windows),
+you can place these native libraries directly inside the same `scripts/` folder.
 
 # Setting up a Lua mod development environment
 
@@ -55,7 +55,7 @@ It is much easier to write mods if your code editor or IDE is properly configure
 
 1) Configure your code editor/IDE to support Lua syntax highlighting and code completion. If you use VSCode, see here in [Using Custom Lua Bindings](./using-custom-lua-bindings).
 
-2) Make sure that your build of UE4SS contains `Mods\shared\Types.lua` (a development build from Github releases contains it). This will load the UE4SS API definitions in your IDE.
+2) Make sure that your build of UE4SS contains `Mods/shared/Types.lua` (a development build from Github releases contains it). This will load the UE4SS API definitions in your IDE.
 
 3) (Optional) [Dump the Lua Bindings](./using-custom-lua-bindings.md#dumping-custom-lua-bindings) fromm UE4SS Gui console, and [follow the recommendations to load them](./using-custom-lua-bindings.md#to-use-bindings) here.
 
@@ -89,7 +89,7 @@ find your mod's output among other log strings in the console.
 
 The player coordinates are retrieved in the following way:
 
-1) Gets the [player controller](https://docs.unrealengine.com/4.27/en-US/API/Runtime/Engine/GameFramework/APlayerController/) using [UE4SS `UEHelpers` class](https://github.com/UE4SS-RE/RE-UE4SS/blob/main/assets/Mods/shared/UEHelpers/UEHelpers.lua).
+1) Gets the [player controller](https://docs.unrealengine.com/4.27/en-US/API/Runtime/Engine/GameFramework/APlayerController/) using [UE4SS `UEHelpers` class](https://github.com/XarminaEu/ue4ss-linux/blob/main/assets/Mods/shared/UEHelpers/UEHelpers.lua).
 2) Get [the `Pawn`](https://docs.unrealengine.com/4.27/en-US/API/Runtime/Engine/GameFramework/APawn/), which represents the actual "physical" entity that the player can control in Unreal Engine.
 3) Call the appropriate Unreal Engine [method `K2_GetActorLocation`](https://docs.unrealengine.com/4.27/en-US/API/Runtime/Engine/GameFramework/AActor/K2_GetActorLocation/) that returns a `Pawn`'s location (by accessing its parent `Actor` class).
 4) The location is a 3-component vector of Unreal Engine type `FVector`, having `X`, `Y` and `Z` as its fields.

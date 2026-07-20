@@ -1,5 +1,7 @@
 # Live Viewer
 
+> **Note:** The Live Viewer requires the GUI, which is disabled in the Linux build (headless mode only). This feature is only available on Windows builds with GUI enabled.
+
 The Live Viewer is a tool that allows you to search, view, edit & watch the properties of every object making it very powerful for debugging mods or figuring out how values are changed during runtime. Note however that it cannot show unreflected data.
 
 In order to see it, you must make sure that the following configuration settings are set to 1:

@@ -1,5 +1,7 @@
 # Dumpers
 
+> **Note:** Some dumper features (DumpStaticMeshes, DumpAllActors) require the GUI, which is disabled in the Linux build. On Linux, these can be called from Lua but will print a warning. The other dumpers (C++ Header Generator, UHT Dumper, Object Dumper, .usmap Dumper) work without GUI.
+
 ## C++ Header Generator
 
 The C++ dumper is a tool that generates C++ headers from UE4 classes and blueprints.

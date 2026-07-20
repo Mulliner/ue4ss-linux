@@ -3,20 +3,20 @@
 1. This part assumes you have UE4SS installed and working for your game already. If not, refer to the [installation guide](../installation-guide.md). 
 
 2. After building, you will have the following file:
-    - `MyAwesomeMod.dll` in `MyMods\Binaries\<Configuration>\MyAwesomeMod`
+    - `libMyAwesomeMod.so` in `MyMods/build/MyAwesomeMod/`
     
 3. Navigate over to your game's executable folder and open the `Mods` folder. Here we'll do a couple things:  
-    - Create a folder structure in `Mods` that looks like `MyAwesomeMod\dlls`. 
-    - Move `MyAwesomeMod.dll` inside the `dlls` folder and rename it to `main.dll`.
+    - Create a folder structure in `Mods` that looks like `MyAwesomeMod/libs`. 
+    - Move `libMyAwesomeMod.so` inside the `libs` folder and rename it to `main.so`.
 
-> NOTE: `MyAwesomeMod.dll` will also work and UE4SS will use `MyAwesomeMod.dll` if `main.dll` isn't present.
+> NOTE: `libMyAwesomeMod.so` will also work and UE4SS will use `libMyAwesomeMod.so` if `main.so` isn't present.
 
 The result should look like:
 ```
-Mods\
-    MyAwesomeMod\
-        dlls\
-            main.dll
+Mods/
+    MyAwesomeMod/
+        libs/
+            main.so
 ```    
 
 4. To enable loading of your mod in-game you will have to edit the `mods.txt` located in the `Mods` folder. By default it looks something like this:
@@ -45,10 +45,10 @@ MyAwesomeMod : 1
 Alternatively, place an empty text file named `enabled.txt` inside of the MyAwesomeMod folder.  This method is not recommended because it does not allow load ordering  
 and bypasses mods.txt, but may allow for easier installation by end users.
 
-5. Launch your game and if everything was done correctly, you should see the text "MyAwesomeMod says hello" highlighted in blue somewhere at the top of UE4SS console (before all the scanning occurs), and if you used the `on_unreal_init` function, you should see "Object Name: /Script/CoreUObject.Object" highlighted in blue as well (right after the scanning finishes).
+5. Launch your game server with `LD_PRELOAD` set to `libUE4SS.so` and if everything was done correctly, you should see the text "MyAwesomeMod says hello" in the server console output (before all the scanning occurs), and if you used the `on_unreal_init` function, you should see "Object Name: /Script/CoreUObject.Object" as well (right after the scanning finishes).
 
 ## Automation
 
-Now that you understand how the process works, you can use the [UE4SS CPP Template](https://github.com/UE4SS-RE/UE4SSCPPTemplate) repository that automates the process of creating a mod, building it, and installing it. Be aware that the `new_mod_setup.bat` script will checkout the commit at the latest release so that you can be sure that your mod is being built with the correct ABI as latest release. 
+Now that you understand how the process works, you can use the [UE4SS CPP Template](https://github.com/UE4SS-RE/UE4SSCPPTemplate) repository that automates the process of creating a mod, building it, and installing it. Be aware that the setup script will checkout the commit at the latest release so that you can be sure that your mod is being built with the correct ABI as latest release. 
 
-> NOTE: Any changes to the build system that affects the mod template is pushed to the `dev` branch, which is then merged into main when a new UE4SS release is created. This makes sure that the template is always in-sync with the latest UE4SS release.
+> NOTE: On Linux, C++ mods must be compiled as `.so` files (not `.dll`). The mod folder uses `libs/` instead of `dlls/`.

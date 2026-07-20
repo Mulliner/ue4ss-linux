@@ -1,6 +1,6 @@
 # Unreal Engine 4/5 Scripting System
 
-[Home](./README.md)
+[Home](../README.md)
 [Installation](./installation-guide.md)
 [Contributing](./contributing.md)
 [Update Migration Guide](./upgrade-guide.md)

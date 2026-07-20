@@ -4,6 +4,8 @@ To make development of Lua mods easier, we've added the ability to dump custom L
 
 ## Dumping Custom Lua Bindings
 
+> **Note:** Dumping custom Lua bindings from the GUI is not available on the Linux build (GUI is disabled). You can use the `GenerateLuaTypes` Lua function instead to generate type definitions programmatically.
+
 Simply open the Dumpers tab in the GUI console window and hit the "Dump Lua Bindings" button. 
 
 The generator will place the files into the `Mods/shared/types` folder. 

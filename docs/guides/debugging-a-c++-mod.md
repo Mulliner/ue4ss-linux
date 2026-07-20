@@ -6,7 +6,8 @@ Note that this guide is also a completely valid way to debug UE4SS itself.
 
 ## Prerequisites
 This guide assumes you already know how to use a debugger. If you don't, check your IDE's guides; here's a few:
-* [Visual Studio](https://learn.microsoft.com/en-us/visualstudio/debugger/debugger-feature-tour?view=visualstudio)
+* [GDB](https://www.gnu.org/software/gdb/documentation/) (Linux)
+* [Visual Studio](https://learn.microsoft.com/en-us/visualstudio/debugger/debugger-feature-tour?view=visualstudio) (Windows)
 * [CLion](https://www.jetbrains.com/help/clion/debugging-code.html#useful-debugger-shortcuts)
 * [VS Code](https://code.visualstudio.com/docs/cpp/cpp-debug)
 

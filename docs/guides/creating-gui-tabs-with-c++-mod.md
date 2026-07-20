@@ -1,5 +1,7 @@
 # Creating GUI tabs with a C++ mod
 
+> **Note:** GUI is disabled in the Linux build (headless mode only). This guide is only applicable to Windows builds with GUI enabled.
+>
 > UE4SS already includes the ImGui library to render its console GUI, built from the [UE4SS-RE/imgui](https://github.com/UE4SS-RE/imgui) repo. Refer to [ImGui documentation in that repo](https://github.com/UE4SS-RE/imgui/tree/master/docs) on how to use ImGui-specific classes and methods for rendering actual buttons and textboxes and other window objects.
 
 This guide will show how you create custom tabs for the GUI with a C++ mod, and the guide will take the form of comments in the code example below:
@@ -75,7 +77,7 @@ public:
     }
 };
 
-#define MY_AWESOME_MOD_API __declspec(dllexport)
+#define MY_AWESOME_MOD_API __attribute__((visibility("default")))
 extern "C"
 {
     MY_AWESOME_MOD_API RC::CppUserModBase* start_mod()

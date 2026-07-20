@@ -16,8 +16,8 @@ Part four will cover installation of the mod.
 2. Check your email and accept the invitation to the @EpicGames GitHub organization for Unreal source access.
 3. Setup SSH keys on your GitHub account which will let git access the Unreal source you got access for in 2 and 3.
 4. Make a directory somewhere on your computer, the name doesn't matter but I named mine `MyMods`.
-5. Clone the RE-UE4SS repo so that you end up with `MyMods/RE-UE4SS`.
-6. Open CMD and cd into `RE-UE4SS` and execute: `git submodule update --init --recursive`
+5. Clone the ue4ss-linux repo so that you end up with `MyMods/ue4ss-linux`.
+6. Open a terminal and cd into `ue4ss-linux` and execute: `git submodule update --init --recursive`
 7. Go back to the `MyMods` directory and create a new directory, this directory will contain your mod source files.
 I named mine `MyAwesomeMod`.
 8. Create a file called `CMakeLists.txt` inside `MyMods` and put this inside it:
@@ -25,7 +25,7 @@ I named mine `MyAwesomeMod`.
 cmake_minimum_required(VERSION 3.22)
 project(MyMods)
 
-add_subdirectory(RE-UE4SS)
+add_subdirectory(ue4ss-linux)
 add_subdirectory(MyAwesomeMod)
 ```
 
@@ -41,12 +41,13 @@ add_library(${TARGET} SHARED
 target_include_directories(${TARGET} PRIVATE .)
 target_link_libraries(${TARGET} PUBLIC UE4SS)
 
-# Copy the DLL to the game's mod directory after building (optional, adjust path as needed)
+# Copy the .so to the game's mod directory after building (optional, adjust path as needed)
 # add_custom_command(TARGET ${TARGET} POST_BUILD
-#     COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:${TARGET}> "path/to/game/Binaries/Win64/Mods/${TARGET}/dlls/"
+#     COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:${TARGET}> "path/to/game/Binaries/Linux/Mods/${TARGET}/libs/"
 # )
 ```
 2. Make a file called `dllmain.cpp` in `MyMods/MyAwesomeMod` and put this inside it:
+> **Note:** On Linux, replace `__declspec(dllexport)` with `__attribute__((visibility("default")))` or use the `RC_UE4SS_API` macro.
 ```c++
 #include <stdio.h>
 #include <Mod/CppUserModBase.hpp>
@@ -76,7 +77,7 @@ public:
     }
 };
 
-#define MY_AWESOME_MOD_API __declspec(dllexport)
+#define MY_AWESOME_MOD_API __attribute__((visibility("default")))
 extern "C"
 {
     MY_AWESOME_MOD_API RC::CppUserModBase* start_mod()
@@ -90,28 +91,16 @@ extern "C"
     }
 }
 ```
-3. In the command prompt, in the `MyMods` directory, execute either:
-A. Build from command line with Ninja:
+3. In the terminal, in the `MyMods` directory, execute:
 ```bash
 # Configure (Ninja is single-configuration)
-cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Game__Shipping__Win64
+cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 
-# Build (no --config needed for Ninja)
+# Build
 cmake --build build
 ```
-or B. Generate Visual Studio solution:
-```bash
-# Configure (MSVC is multi-configuration)
-cmake -B build -G "Visual Studio 17 2022"
 
-# Build from command line (MSVC requires --config)
-cmake --build build --config Game__Shipping__Win64
-```
-If you chose option `B`, the VS solution will be in the `build` directory.
-
-4. Open `MyMods/build/MyMods.sln` in Visual Studio
-5. Make sure that you're set to the `Game__Shipping__Win64` configuration unless you want to debug.
-6. Find your project (in my case: MyAwesomeMod) in the solution explorer and right click it and hit `Build`.
+4. The resulting `libMyAwesomeMod.so` will be in `MyMods/build/MyAwesomeMod/`.
 
 ## Part #3
 In this part, we're going to learn how to log to file, and both consoles, as well as find a UObject by name, and log that name.
@@ -146,7 +135,7 @@ auto on_unreal_init() -> void override
 Note that `Output::send` doesn't require a `LogLevel` and that we're using `{}` in the format string instead of `%s`.  
 The `Output::send` function uses `std::format` in the back-end so you should do some research around std::format or libfmt if you want to know more about it.
 
-7. Right click your project and hit `Build`.
+7. Rebuild the project with `cmake --build build`.
 
 ## Part #4
 
