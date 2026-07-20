@@ -492,7 +492,7 @@ namespace RC::Unreal
          *
          * @param Dest the address of the value for this property that should be cleared.
          */
-        inline void InitializeValue( void* Dest ) const;
+        void InitializeValue( void* Dest ) const;
 
         /**
          * Zeros, copies from the default, or calls the constructor for on the value for this property.
