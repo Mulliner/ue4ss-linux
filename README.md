@@ -1,6 +1,6 @@
 # UE4SS Linux Native Port
 
-> **Copyright (c) 2024-2026 [rl-dev.de](https://rl-dev.de)**
+
 >
 > Based on [RE-UE4SS](https://github.com/UE4SS-RE/RE-UE4SS) by [UE4SS-RE](https://github.com/UE4SS-RE).
 > Linux port originally by [calebm02](https://github.com/calebm02/RE-UE4SS-Linux).
