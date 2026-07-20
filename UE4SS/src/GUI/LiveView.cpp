@@ -8,6 +8,9 @@
 #include <variant>
 #include <regex>
 
+#ifdef __linux__
+#include <UE4SSCompat.hpp>
+#endif
 #include <DynamicOutput/DynamicOutput.hpp>
 #include <ExceptionHandling.hpp>
 #include <Constructs/Views/EnumerateView.hpp>
@@ -1266,7 +1269,7 @@ namespace RC::GUI
         {
             if (ImGui::IsItemClicked())
             {
-                printf_s("Clicked: %S\n", FromCharTypePtr<wchar_t>(ustruct->GetFullName().c_str()));
+                printf("Clicked: %s\n", to_string(ustruct->GetFullName()).c_str());
                 select_object(0, ustruct->GetObjectItem(), ustruct, AffectsHistory::Yes);
             }
         }
@@ -1536,13 +1539,13 @@ namespace RC::GUI
             }
             auto value_as_string = Unreal::UKismetNodeHelperLibrary::GetEnumeratorUserFriendlyName(uenum, enum_index);
             ImGui::SameLine();
-            ImGui::Text(fmt::format("{}", to_string(value_as_string)).c_str());
+            ImGui::TextUnformatted(fmt::format("{}", to_string(value_as_string)).c_str());
             render_property_value_context_menu();
         }
         else
         {
             ImGui::SameLine();
-            ImGui::Text(fmt::format("{}", to_string(*property_text)).c_str());
+            ImGui::TextUnformatted(fmt::format("{}", to_string(*property_text)).c_str());
             render_property_value_context_menu();
         }
 
@@ -1926,7 +1929,7 @@ namespace RC::GUI
     auto render_flags(ObjectType* generic_instance, const char* display_label) -> void
     {
         auto raw_unsafe_object_flags = Stringifier::get_raw_flags(generic_instance);
-        ImGui::Text("%s (Raw): 0x%X", display_label, raw_unsafe_object_flags);
+        ImGui::Text("%s (Raw): 0x%X", display_label, static_cast<uint32_t>(raw_unsafe_object_flags));
         if (ImGui::BeginPopupContextItem(Stringifier::popup_context_item_id_raw))
         {
             if (ImGui::MenuItem("Copy raw flags"))
@@ -1994,7 +1997,7 @@ namespace RC::GUI
         auto object_full_name = get_object_full_name(object);
 
         ImGui::Text("Selected: %s", to_string(object->GetName()).c_str());
-        ImGui::Text("Address: %016llX", std::bit_cast<uintptr_t>(object));
+        ImGui::Text("Address: %016zX", std::bit_cast<uintptr_t>(object));
         if (ImGui::BeginPopupContextItem(object_full_name))
         {
             if (ImGui::MenuItem("Copy address"))
@@ -2004,7 +2007,7 @@ namespace RC::GUI
             ImGui::EndPopup();
         }
         ImGui::Text("ClassPrivate: %s", to_string(object->GetClassPrivate()->GetName()).c_str());
-        ImGui::Text("Path: %S", object->GetPathName().c_str());
+        ImGui::Text("Path: %s", to_string(object->GetPathName()).c_str());
         render_flags<ObjectFlagsStringifier>(object, "ObjectFlags");
         if (auto as_class = Cast<UClass>(object); as_class)
         {
@@ -2055,7 +2058,7 @@ namespace RC::GUI
                     auto supers_super = *supers_super_it;
                     super_size -= supers_super->GetPropertiesSize();
                 }
-                ImGui::Text("%S: 0x%X (0x%X)", super->GetName().c_str(), super_size, super->GetPropertiesSize());
+                ImGui::Text("%s: 0x%X (0x%X)", to_string(super->GetName()).c_str(), super_size, super->GetPropertiesSize());
             }
 
             ImGui::Unindent();
@@ -2085,8 +2088,8 @@ namespace RC::GUI
         bool tried_to_open_nullptr_property{};
         auto property_full_name = property->GetFullName();
 
-        ImGui::Text("Selected: %S", property->GetName().c_str());
-        ImGui::Text("Address: %016llX", std::bit_cast<uintptr_t>(property));
+        ImGui::Text("Selected: %s", to_string(property->GetName()).c_str());
+        ImGui::Text("Address: %016zX", std::bit_cast<uintptr_t>(property));
         if (ImGui::BeginPopupContextItem(to_string(property_full_name).c_str()))
         {
             if (ImGui::MenuItem("Copy address"))
@@ -2095,15 +2098,15 @@ namespace RC::GUI
             }
             ImGui::EndPopup();
         }
-        ImGui::Text("Class: %S", property->GetClass().GetName().c_str());
-        ImGui::Text("Path: %S", property->GetPathName().c_str());
+        ImGui::Text("Class: %s", to_string(property->GetClass().GetName()).c_str());
+        ImGui::Text("Path: %s", to_string(property->GetPathName()).c_str());
 
         ImGui::Separator();
 
         ImGui::Text("ArrayDim: %i (0x%X)", property->GetArrayDim(), property->GetArrayDim());
         ImGui::Text("ElementSize: %i (0x%X)", property->GetElementSize(), property->GetElementSize());
         auto property_flags = property->GetPropertyFlags();
-        ImGui::Text("PropertyFlags (Raw): 0x%llX", property_flags);
+        ImGui::Text("PropertyFlags (Raw): 0x%zX", static_cast<size_t>(property_flags));
         if (ImGui::BeginPopupContextItem("property_raw_flags_menu"))
         {
             if (ImGui::MenuItem("Copy raw flags"))
@@ -2160,7 +2163,7 @@ namespace RC::GUI
         ImGui::Unindent();
         ImGui::Text("RepIndex: %i (0x%X)", property->GetRepIndex(), property->GetRepIndex());
         ImGui::Text("OffsetInternal: %i (0x%X)", property->GetOffset_Internal(), property->GetOffset_Internal());
-        ImGui::Text("RepNotifyFunc: %S", property->GetRepNotifyFunc().ToString().c_str());
+        ImGui::Text("RepNotifyFunc: %s", to_string(property->GetRepNotifyFunc().ToString()).c_str());
         if (ImGui::IsItemHovered())
         {
             ImGui::BeginTooltip();
@@ -2169,7 +2172,7 @@ namespace RC::GUI
         }
 
         auto render_property_pointer = [](std::string_view pointer_name, FProperty* property) {
-            ImGui::Text("%s: %p %S", pointer_name.data(), property, property ? property->GetFullName().c_str() : STR("None"));
+            ImGui::Text("%s: %p %s", pointer_name.data(), static_cast<void*>(property), property ? to_string(property->GetFullName()).c_str() : "None");
             return property;
         };
         int go_to_property_menu_count{};
@@ -3495,7 +3498,7 @@ namespace RC::GUI
                     ImGui::PopStyleVar();
 
                     ImGui::TableNextColumn();
-                    ImGui::Text("%S.%S", watch.object_name.c_str(), watch.property_name.c_str());
+                    ImGui::Text("%s.%s", to_string(watch.object_name).c_str(), to_string(watch.property_name).c_str());
                     if (watch.show_history)
                     {
                         ImGui::PushID(fmt::format("history_{}", watch.hash).c_str());

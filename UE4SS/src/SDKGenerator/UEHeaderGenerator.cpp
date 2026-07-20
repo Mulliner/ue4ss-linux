@@ -4230,6 +4230,8 @@ namespace RC::UEGenerator
         this->m_current_indent_count = 0;
     }
 
+    GeneratedFile::~GeneratedFile() = default;
+
     auto GeneratedFile::append_line(const StringType& line) -> void
     {
         for (int32_t i = 0; i < m_current_indent_count; i++)
@@ -4315,6 +4317,8 @@ namespace RC::UEGenerator
         this->m_is_implementation_file = is_implementation_file;
         this->m_object = object;
     }
+
+    GeneratedSourceFile::~GeneratedSourceFile() = default;
 
     auto GeneratedSourceFile::set_header_file(GeneratedSourceFile* header_file) -> void
     {

@@ -898,11 +898,22 @@ namespace RC
 #ifdef __linux__
         // On Linux, patternsleuth's ps_scan uses Windows-specific AOB patterns that will never match.
         // Provide scan overrides that use dlsym to find functions by symbol name instead.
-        // Also set the engine version directly since we can't scan for it.
+        // Also set the engine version from settings or fall back to default.
         {
-            // Palworld uses UE5 5.1
-            Unreal::Version::Major = 5;
-            Unreal::Version::Minor = 1;
+            // Use engine version from UE4SS-settings.ini [EngineVersionOverride] if specified,
+            // otherwise default to UE5.1 (Palworld).
+            if (settings_manager.EngineVersionOverride.MajorVersion > 0)
+            {
+                Unreal::Version::Major = static_cast<int32_t>(settings_manager.EngineVersionOverride.MajorVersion);
+                Unreal::Version::Minor = static_cast<int32_t>(settings_manager.EngineVersionOverride.MinorVersion);
+                UE4SS_DBG( "[UE4SS] Engine version from settings: %d.%d\n", (int)Unreal::Version::Major, (int)Unreal::Version::Minor);
+            }
+            else
+            {
+                Unreal::Version::Major = 5;
+                Unreal::Version::Minor = 1;
+                UE4SS_DBG( "[UE4SS] Engine version default (no override): %d.%d\n", (int)Unreal::Version::Major, (int)Unreal::Version::Minor);
+            }
             config.ScanOverrides.version_finder = [&]([[maybe_unused]] auto&, Unreal::Signatures::ScanResult&) {};
 
             // Try to find functions via dlsym from the main executable
@@ -1026,14 +1037,33 @@ namespace RC
                     }
                 };
 
-                // Override FUObjectHashTables::Get scan (no-op, non-fatal)
-                config.ScanOverrides.fuobject_hash_tables_get = [&](std::vector<SignatureContainer>&, Unreal::Signatures::ScanResult&) {
-                    UE4SS_DBG( "[UE4SS] dlsym: FUObjectHashTables::Get skipped (no scan on Linux)\n");
+                // Override FUObjectHashTables::Get scan — try dlsym, non-fatal if not found
+                config.ScanOverrides.fuobject_hash_tables_get = [&](std::vector<SignatureContainer>&, Unreal::Signatures::ScanResult& scan_result) {
+                    void* addr = try_resolve("FUObjectHashTables::Get");
+                    if (!addr) addr = try_resolve("GetObjectHashTables");
+                    if (!addr) addr = try_resolve("FUObjectArray::GetObjectHashTables");
+                    if (addr)
+                    {
+                        scan_result.SuccessMessage.emplace_back(STR("FUObjectHashTables::Get found via dlsym"));
+                    }
+                    else
+                    {
+                        UE4SS_DBG( "[UE4SS] dlsym: FUObjectHashTables::Get not found (non-fatal, stripped binary?)\n");
+                    }
                 };
 
-                // Override console manager singleton scan (no-op, non-fatal)
-                config.ScanOverrides.console_manager_singleton = [&](std::vector<SignatureContainer>&, Unreal::Signatures::ScanResult&) {
-                    UE4SS_DBG( "[UE4SS] dlsym: console_manager_singleton skipped (no scan on Linux)\n");
+                // Override console manager singleton scan — try dlsym, non-fatal if not found
+                config.ScanOverrides.console_manager_singleton = [&](std::vector<SignatureContainer>&, Unreal::Signatures::ScanResult& scan_result) {
+                    void* addr = try_resolve("GConsoleManager");
+                    if (!addr) addr = try_resolve("ConsoleManager");
+                    if (addr)
+                    {
+                        scan_result.SuccessMessage.emplace_back(STR("ConsoleManager singleton found via dlsym"));
+                    }
+                    else
+                    {
+                        UE4SS_DBG( "[UE4SS] dlsym: console_manager_singleton not found (non-fatal, stripped binary?)\n");
+                    }
                 };
 
                 // Override ProcessInternal scan — needed for BP mod loading (BeginPlay hooks, function calls)

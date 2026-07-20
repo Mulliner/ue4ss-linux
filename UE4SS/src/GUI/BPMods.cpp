@@ -120,7 +120,7 @@ namespace RC::GUI::BPMods
                     }
                     ImGui::Unindent();
                 }
-                ImGui::Text("");
+                ImGui::TextUnformatted("");
                 ImGui::Unindent();
             }
         }

@@ -94,7 +94,6 @@ public:
         {
             RC::Output::send<RC::LogLevel::Error>(STR("Unable to open file for writing: '{}': {}\n"), RC::ensure_str(FileName), RC::ensure_str(std::strerror(errno)));
         }
-        printf("");
     }
 
     virtual ~FileWriter()

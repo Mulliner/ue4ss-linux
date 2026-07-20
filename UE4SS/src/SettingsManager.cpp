@@ -1,4 +1,9 @@
 #include <cstdio>
+#include <fstream>
+#include <map>
+#include <optional>
+#include <algorithm>
+#include <cctype>
 #include <Helpers/String.hpp>
 #include <IniParser/Ini.hpp>
 #include <SettingsManager.hpp>
@@ -46,96 +51,201 @@ namespace RC
     auto SettingsManager::deserialize(std::filesystem::path& file_name) -> void
     {
 #ifdef __linux__
-        // On Linux, the INI parser crashes with SIGSEGV when accessing the unordered_map
-        // after parsing. This is likely due to memory corruption from the game's own
-        // memory allocator interfering with our std::wstring operations.
-        // Use hardcoded defaults instead.
-        UE4SS_DBG( "[UE4SS] SettingsManager: using hardcoded defaults on Linux (INI parser bypass)\n");
+        // On Linux, the wide-string INI parser (using u16string + unordered_map) crashes
+        // with SIGSEGV due to the game's memory allocator interfering with std::wstring ops.
+        // Instead, parse the INI file as narrow strings (std::string) and convert as needed.
+        UE4SS_DBG( "[UE4SS] SettingsManager: parsing INI with narrow-string parser on Linux\n");
 
-        General.EnableHotReloadSystem = true;
-        General.EnableAutoReloadingLuaMods = true;
-        General.UseCache = true;
-        General.InvalidateCacheIfDLLDiffers = true;
-        General.EnableDebugKeyBindings = false;
-        General.SecondsToScanBeforeGivingUp = 30;
-        General.UseUObjectArrayCache = true;
-        General.DoEarlyScan = false;
-        General.SearchByAddress = false;
-        General.DefaultExecuteInGameThreadMethod = GameThreadExecutionMethod::EngineTick;
+        // Simple narrow-string INI parser
+        std::map<std::string, std::map<std::string, std::string>> ini_sections;
+        std::string current_section;
 
-        Debug.SimpleConsoleEnabled = true;
-        Debug.DebugConsoleEnabled = false;
-        Debug.DebugConsoleVisible = false;
-        Debug.DebugGUIFontScaling = 1.0f;
-
-        Threads.SigScannerNumThreads = -1;
-        Threads.SigScannerMultithreadingModuleSizeThreshold = 104857600;
-
-        Hooks.HookProcessInternal = true;
-        Hooks.HookProcessLocalScriptFunction = true;
-        Hooks.HookLoadMap = true;
-        Hooks.HookInitGameState = true;
-        Hooks.HookCallFunctionByNameWithArguments = true;
-        Hooks.HookBeginPlay = true;
-        Hooks.HookEndPlay = true;
-        Hooks.HookLocalPlayerExec = false;
-        Hooks.HookAActorTick = false;
-        Hooks.HookEngineTick = true;
-        Hooks.HookGameViewportClientTick = false;
-        Hooks.HookUObjectProcessEvent = false;
-        Hooks.HookProcessConsoleExec = false;
-        Hooks.HookUStructLink = false;
-        Hooks.FExecVTableOffsetInLocalPlayer = 0;
-
-        CrashDump.EnableDumping = false;
-        CrashDump.FullMemoryDump = false;
-
-        // Read DiscordWebhookURL and DebugLogLevel from INI file manually (simple string search)
         {
             std::ifstream ini_file(file_name);
             if (ini_file.is_open())
             {
-                UE4SS_DBG( "[UE4SS] SettingsManager: INI file opened for scanning\n");
                 std::string line;
                 while (std::getline(ini_file, line))
                 {
-                    // Look for DiscordWebhookURL= in the line
-                    auto pos = line.find("DiscordWebhookURL=");
-                    if (pos != std::string::npos)
+                    // Trim trailing \r
+                    if (!line.empty() && line.back() == '\r') line.pop_back();
+                    // Trim leading/trailing whitespace
+                    auto first = line.find_first_not_of(" \t");
+                    if (first == std::string::npos) continue;
+                    auto last = line.find_last_not_of(" \t");
+                    std::string trimmed = line.substr(first, last - first + 1);
+
+                    if (trimmed.empty() || trimmed[0] == ';' || trimmed[0] == '#') continue;
+
+                    if (trimmed[0] == '[' && trimmed.back() == ']')
                     {
-                        std::string url = line.substr(pos + 18);
-                        // Trim whitespace
-                        while (!url.empty() && (url.front() == ' ' || url.front() == '\t' || url.front() == '\r')) url.erase(url.begin());
-                        while (!url.empty() && (url.back() == ' ' || url.back() == '\t' || url.back() == '\r')) url.pop_back();
-                        if (!url.empty())
-                        {
-                            General.DiscordWebhookURL = StringType(url.begin(), url.end());
-                            UE4SS_DBG( "[UE4SS] SettingsManager: found DiscordWebhookURL in INI (%zu chars)\n", url.size());
-                        }
-                        else
-                        {
-                            UE4SS_DBG( "[UE4SS] SettingsManager: DiscordWebhookURL found in INI but is EMPTY - please set it in UE4SS-settings.ini\n");
-                        }
+                        current_section = trimmed.substr(1, trimmed.size() - 2);
+                        continue;
                     }
 
-                    // Look for DebugLogLevel= in the line
-                    pos = line.find("DebugLogLevel=");
-                    if (pos != std::string::npos)
-                    {
-                        std::string val = line.substr(pos + 14);
-                        while (!val.empty() && (val.front() == ' ' || val.front() == '\t')) val.erase(val.begin());
-                        while (!val.empty() && (val.back() == ' ' || val.back() == '\t' || val.back() == '\r')) val.pop_back();
-                        try { General.DebugLogLevel = std::stoll(val); } catch (...) {}
-                    }
+                    auto eq = trimmed.find('=');
+                    if (eq == std::string::npos) continue;
+                    std::string key = trimmed.substr(0, eq);
+                    std::string val = trimmed.substr(eq + 1);
+                    // Trim key and val
+                    auto kfirst = key.find_first_not_of(" \t");
+                    auto klast = key.find_last_not_of(" \t");
+                    if (kfirst != std::string::npos) key = key.substr(kfirst, klast - kfirst + 1);
+                    auto vfirst = val.find_first_not_of(" \t");
+                    auto vlast = val.find_last_not_of(" \t");
+                    if (vfirst != std::string::npos) val = val.substr(vfirst, vlast - vfirst + 1);
+                    else val.clear();
+
+                    ini_sections[current_section][key] = val;
                 }
+                UE4SS_DBG( "[UE4SS] SettingsManager: INI parsed, %zu sections\n", ini_sections.size());
             }
             else
             {
-                UE4SS_DBG( "[UE4SS] SettingsManager: could not open INI file: %s\n", file_name.string().c_str());
+                UE4SS_DBG( "[UE4SS] SettingsManager: could not open INI file: %s, using defaults\n", file_name.string().c_str());
             }
         }
 
-        UE4SS_DBG( "[UE4SS] SettingsManager: hardcoded defaults applied.\n");
+        // Helper lambdas
+        auto get_str = [&](const std::string& section, const std::string& key) -> std::optional<std::string> {
+            auto sit = ini_sections.find(section);
+            if (sit == ini_sections.end()) return std::nullopt;
+            auto kit = sit->second.find(key);
+            if (kit == sit->second.end()) return std::nullopt;
+            return kit->second;
+        };
+        auto get_bool = [&](const std::string& section, const std::string& key, bool def) -> bool {
+            auto v = get_str(section, key);
+            if (!v) return def;
+            std::string lower = *v;
+            std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c){ return std::tolower(c); });
+            if (lower == "true" || lower == "1") return true;
+            if (lower == "false" || lower == "0") return false;
+            return def;
+        };
+        auto get_int64 = [&](const std::string& section, const std::string& key, int64_t def) -> int64_t {
+            auto v = get_str(section, key);
+            if (!v) return def;
+            try { return std::stoll(*v); } catch (...) { return def; }
+        };
+        auto get_float = [&](const std::string& section, const std::string& key, float def) -> float {
+            auto v = get_str(section, key);
+            if (!v) return def;
+            try { return std::stof(*v); } catch (...) { return def; }
+        };
+        auto to_string_type = [](const std::string& s) -> StringType {
+            return StringType(s.begin(), s.end());
+        };
+
+        // [Overrides]
+        if (auto v = get_str("Overrides", "ModsFolderPath")) Overrides.ModsFolderPath = to_string_type(*v);
+        if (auto v = get_str("Overrides", "ControllingModsTxt")) Overrides.ControllingModsTxt = to_string_type(*v);
+
+        // [General]
+        General.EnableHotReloadSystem = get_bool("General", "EnableHotReloadSystem", true);
+        General.EnableAutoReloadingLuaMods = get_bool("General", "EnableAutoReloadingLuaMods", true);
+        General.UseCache = get_bool("General", "UseCache", true);
+        General.InvalidateCacheIfDLLDiffers = get_bool("General", "InvalidateCacheIfDLLDiffers", true);
+        General.EnableDebugKeyBindings = get_bool("General", "EnableDebugKeyBindings", false);
+        General.SecondsToScanBeforeGivingUp = get_int64("General", "SecondsToScanBeforeGivingUp", 30);
+        General.UseUObjectArrayCache = get_bool("General", "bUseUObjectArrayCache", true);
+        General.DoEarlyScan = get_bool("General", "DoEarlyScan", false);
+        General.SearchByAddress = get_bool("General", "bEnableSeachByMemoryAddress", false);
+
+        if (auto v = get_str("General", "DefaultExecuteInGameThreadMethod"))
+        {
+            std::string lower = *v;
+            std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c){ return std::tolower(c); });
+            if (lower == "processevent") General.DefaultExecuteInGameThreadMethod = GameThreadExecutionMethod::ProcessEvent;
+            else General.DefaultExecuteInGameThreadMethod = GameThreadExecutionMethod::EngineTick;
+        }
+        if (auto v = get_str("General", "DefaultFNameToStringMethod"))
+        {
+            std::string lower = *v;
+            std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c){ return std::tolower(c); });
+            if (lower == "conv_nametostring") General.DefaultFNameToStringMethod = Unreal::UnrealInitializer::FNameToStringMethod::Conv_NameToString;
+            else General.DefaultFNameToStringMethod = Unreal::UnrealInitializer::FNameToStringMethod::Scan;
+        }
+        if (auto v = get_str("General", "HotReloadKey"))
+        {
+            try { General.HotReloadKey = Input::string_to_key(to_string_type(*v)); }
+            catch (...) { UE4SS_DBG("[UE4SS] SettingsManager: invalid HotReloadKey value: %s\n", v->c_str()); }
+        }
+        if (auto v = get_str("General", "InputSource"))
+        {
+            General.InputSource = to_string_type(*v);
+        }
+        if (auto v = get_str("General", "DiscordWebhookURL"))
+        {
+            if (!v->empty()) General.DiscordWebhookURL = to_string_type(*v);
+        }
+        General.DebugLogLevel = get_int64("General", "DebugLogLevel", 0);
+
+        // [EngineVersionOverride]
+        EngineVersionOverride.MajorVersion = get_int64("EngineVersionOverride", "MajorVersion", -1);
+        EngineVersionOverride.MinorVersion = get_int64("EngineVersionOverride", "MinorVersion", -1);
+        EngineVersionOverride.DebugBuild = get_bool("EngineVersionOverride", "DebugBuild", false);
+
+        // [ObjectDumper]
+        ObjectDumper.LoadAllAssetsBeforeDumpingObjects = get_bool("ObjectDumper", "LoadAllAssetsBeforeDumpingObjects", false);
+        ObjectDumper.UseModuleOffsets = get_bool("ObjectDumper", "UseModuleOffsets", false);
+
+        // [CXXHeaderGenerator]
+        CXXHeaderGenerator.DumpOffsetsAndSizes = get_bool("CXXHeaderGenerator", "DumpOffsetsAndSizes", false);
+        CXXHeaderGenerator.KeepMemoryLayout = get_bool("CXXHeaderGenerator", "KeepMemoryLayout", false);
+        CXXHeaderGenerator.LoadAllAssetsBeforeGeneratingCXXHeaders = get_bool("CXXHeaderGenerator", "LoadAllAssetsBeforeGeneratingCXXHeaders", false);
+
+        // [UHTHeaderGenerator]
+        UHTHeaderGenerator.IgnoreAllCoreEngineModules = get_bool("UHTHeaderGenerator", "IgnoreAllCoreEngineModules", false);
+        UHTHeaderGenerator.IgnoreEngineAndCoreUObject = get_bool("UHTHeaderGenerator", "IgnoreEngineAndCoreUObject", true);
+        UHTHeaderGenerator.MakeAllFunctionsBlueprintCallable = get_bool("UHTHeaderGenerator", "MakeAllFunctionsBlueprintCallable", false);
+        UHTHeaderGenerator.MakeAllPropertyBlueprintsReadWrite = get_bool("UHTHeaderGenerator", "MakeAllPropertyBlueprintsReadWrite", false);
+        UHTHeaderGenerator.MakeEnumClassesBlueprintType = get_bool("UHTHeaderGenerator", "MakeEnumClassesBlueprintType", false);
+        UHTHeaderGenerator.MakeAllConfigsEngineConfig = get_bool("UHTHeaderGenerator", "MakeAllConfigsEngineConfig", false);
+
+        // [Debug]
+        Debug.SimpleConsoleEnabled = get_bool("Debug", "ConsoleEnabled", true);
+        Debug.DebugConsoleEnabled = get_bool("Debug", "GuiConsoleEnabled", false);
+        Debug.DebugConsoleVisible = get_bool("Debug", "GuiConsoleVisible", false);
+        Debug.DebugGUIFontScaling = get_float("Debug", "GuiConsoleFontScaling", 1.0f);
+
+        // [CrashDump]
+        CrashDump.EnableDumping = get_bool("CrashDump", "EnableDumping", false);
+        CrashDump.FullMemoryDump = get_bool("CrashDump", "FullMemoryDump", false);
+
+        // [Threads]
+        Threads.SigScannerNumThreads = get_int64("Threads", "SigScannerNumThreads", -1);
+        Threads.SigScannerMultithreadingModuleSizeThreshold = get_int64("Threads", "SigScannerMultithreadingModuleSizeThreshold", 104857600);
+
+        // [Memory]
+        Memory.MaxMemoryUsageDuringAssetLoading = get_int64("Memory", "MaxMemoryUsageDuringAssetLoading", 85);
+
+        // [Hooks]
+        Hooks.HookProcessInternal = get_bool("Hooks", "HookProcessInternal", true);
+        Hooks.HookProcessLocalScriptFunction = get_bool("Hooks", "HookProcessLocalScriptFunction", true);
+        Hooks.HookLoadMap = get_bool("Hooks", "HookLoadMap", true);
+        Hooks.HookInitGameState = get_bool("Hooks", "HookInitGameState", true);
+        Hooks.HookCallFunctionByNameWithArguments = get_bool("Hooks", "HookCallFunctionByNameWithArguments", true);
+        Hooks.HookBeginPlay = get_bool("Hooks", "HookBeginPlay", true);
+        Hooks.HookEndPlay = get_bool("Hooks", "HookEndPlay", true);
+        Hooks.HookLocalPlayerExec = get_bool("Hooks", "HookLocalPlayerExec", false);
+        Hooks.HookAActorTick = get_bool("Hooks", "HookAActorTick", false);
+        Hooks.HookEngineTick = get_bool("Hooks", "HookEngineTick", true);
+        Hooks.HookGameViewportClientTick = get_bool("Hooks", "HookGameViewportClientTick", false);
+        Hooks.HookUObjectProcessEvent = get_bool("Hooks", "HookUObjectProcessEvent", false);
+        Hooks.HookProcessConsoleExec = get_bool("Hooks", "HookProcessConsoleExec", false);
+        Hooks.HookUStructLink = get_bool("Hooks", "HookUStructLink", false);
+        Hooks.FExecVTableOffsetInLocalPlayer = get_int64("Hooks", "FExecVTableOffsetInLocalPlayer", 0);
+
+        if (auto v = get_str("Hooks", "EngineTickResolveMethod"))
+        {
+            std::string lower = *v;
+            std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c){ return std::tolower(c); });
+            if (lower == "vtable") Hooks.EngineTickResolveMethod = Unreal::UnrealInitializer::FunctionResolveMethod::VTable;
+            else Hooks.EngineTickResolveMethod = Unreal::UnrealInitializer::FunctionResolveMethod::Scan;
+        }
+
+        UE4SS_DBG( "[UE4SS] SettingsManager: INI parsing complete.\n");
 #else
         UE4SS_DBG( "[UE4SS] SettingsManager: opening file %s...\n", file_name.string().c_str());
         auto file = File::open(file_name, File::OpenFor::Reading, File::OverwriteExistingFile::No, File::CreateIfNonExistent::Yes);

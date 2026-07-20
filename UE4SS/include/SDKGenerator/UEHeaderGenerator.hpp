@@ -113,12 +113,13 @@ namespace RC::UEGenerator
 
       public:
         GeneratedFile(const FFilePath& full_file_path);
-        virtual ~GeneratedFile() = default;
+        virtual ~GeneratedFile();
 
-        // Delete copy and move constructors and assignment operator
+        // Delete copy constructor and assignment operator
         GeneratedFile(const GeneratedFile&) = delete;
         GeneratedFile(GeneratedFile&&) = default;
         auto operator=(const GeneratedFile&) -> void = delete;
+        auto operator=(GeneratedFile&&) -> void = delete;
 
         auto append_line(const StringType& line) -> void;
         auto append_line_no_indent(const StringType& line) -> void;
@@ -148,11 +149,13 @@ namespace RC::UEGenerator
         std::map<FProperty*, std::tuple<StringType /*property type*/, StringType /*attach string*/, bool /*access type*/>> attachments{};
 
         GeneratedSourceFile(const FFilePath& file_path, const StringType& file_module_name, bool is_implementation_file, UObject* object);
+        ~GeneratedSourceFile() override;
 
-        // Delete copy and move constructors and assignment operator
+        // Delete copy constructor and assignment operator
         GeneratedSourceFile(const GeneratedSourceFile&) = delete;
         GeneratedSourceFile(GeneratedSourceFile&&) = default;
         auto operator=(const GeneratedSourceFile&) -> void = delete;
+        auto operator=(GeneratedSourceFile&&) -> void = delete;
 
         auto set_header_file(GeneratedSourceFile* header_file) -> void;
         auto add_dependency_object(UObject* object, DependencyLevel dependency_level) -> void;

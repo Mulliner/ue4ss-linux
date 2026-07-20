@@ -1,6 +1,9 @@
 #include <GUI/GLFW3_OpenGL3.hpp>
 
+#include <cstdlib>
 #include <stdexcept>
+
+#include <UE4SSDebug.hpp>
 
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
@@ -32,6 +35,22 @@ namespace RC::GUI
         glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
         glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 2);
         glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE); // 3.2+ only
+
+        // Headless mode: when no display server is available (Linux server),
+        // use EGL context creation API and create a hidden window.
+        // This allows the GUI to render off-screen on headless servers.
+        // For interactive use, run with Xvfb: `xvfb-run -a ./game-server`
+        // Or set DISPLAY=:0 if an X server is available.
+        bool headless = false;
+#ifndef _WIN32
+        if (std::getenv("DISPLAY") == nullptr)
+        {
+            headless = true;
+            glfwWindowHint(GLFW_CONTEXT_CREATION_API, GLFW_EGL_CONTEXT_API);
+            glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
+            UE4SS_DBG("[UE4SS] GUI: headless mode (no DISPLAY, using EGL + hidden window)\n");
+        }
+#endif
 
         // Create window with graphics context
         auto window_title = fmt::format("UE4SS Debugging Tools (OpenGL 3) - {}", render_mode_to_string(UE4SSProgram::settings_manager.Debug.RenderMode));

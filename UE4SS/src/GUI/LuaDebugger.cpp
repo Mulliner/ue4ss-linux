@@ -1,5 +1,8 @@
 #include <GUI/LuaDebugger.hpp>
 
+#ifdef __linux__
+#include <UE4SSCompat.hpp>
+#endif
 #include <algorithm>
 #include <bit>
 #include <ctime>
@@ -2055,7 +2058,7 @@ namespace RC::GUI
         else
         {
             ImGui::TextDisabled("Not paused at breakpoint");
-            ImGui::TextDisabled("");
+            ImGui::TextDisabled(" ");
             ImGui::TextDisabled("To inspect the stack:");
             ImGui::BulletText("Enable Debug checkbox");
             ImGui::BulletText("Click margin to set breakpoints");
@@ -3042,7 +3045,8 @@ namespace RC::GUI
             std::string short_source = bp.source_file;
             if (short_source.length() > 20)
             {
-                short_source = "..." + short_source.substr(short_source.length() - 17);
+                short_source.erase(0, short_source.length() - 17);
+                short_source.insert(0, "...");
             }
 
             ImGui::Text("%s:%d", short_source.c_str(), bp.line);

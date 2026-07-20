@@ -120,7 +120,15 @@ InvalidateCacheIfDLLDiffers=true
 EnableDebugKeyBindings=false
 ```
 
-On Linux, if no settings file is found, hardcoded defaults are used.
+On Linux, `UE4SS-settings.ini` is fully parsed using a narrow-string parser (the wide-string INI parser crashes due to memory allocator conflicts). If no settings file is found, sensible defaults are used.
+
+To use a different game/engine version, add an `[EngineVersionOverride]` section:
+```ini
+[EngineVersionOverride]
+MajorVersion=5
+MinorVersion=1
+DebugBuild=false
+```
 
 ## Verified Games
 
@@ -130,10 +138,11 @@ On Linux, if no settings file is found, hardcoded defaults are used.
 
 - **Work in Progress**: The entire codebase is being ported from Windows to Linux. Since this is an ongoing process, bugs may still occur. Not all Windows-specific code paths have been fully tested — please [report issues](https://github.com/XarminaEu/ue4ss-linux/issues) if you encounter problems.
 - **Function Resolution**: UE function addresses are resolved automatically on unstripped binaries via `dlsym`. On stripped binaries, use `UE4SS_Addresses.ini` to provide addresses manually. Without resolved addresses, mod functionality is limited to Lua scripting and basic operations.
-- **No AOB/Signature Scanning**: patternsleuth (Rust) is not built on Linux, so there is no automatic pattern-based address discovery like on Windows. Every game either needs symbols resolvable via `dlsym`, or manual entries in `UE4SS_Addresses.ini`.
+- **Engine Version**: The engine version defaults to UE 5.1 (Palworld). For other games, set `[EngineVersionOverride]` in `UE4SS-settings.ini` with the correct `MajorVersion` and `MinorVersion`.
+- **AOB/Signature Scanning**: patternsleuth (Rust) is built on Linux via Corrosion with ELF support. Pattern-based address discovery works for ELF binaries. On unstripped binaries, `dlsym` is used as the primary resolution method; patternsleuth provides fallback AOB scanning. On stripped binaries, manual entries in `UE4SS_Addresses.ini` may still be needed if AOB patterns don't match.
 - **Mod Lifecycle**: `LuaMod::on_program_start()` and C++ mods' `on_program_start()` now run on Linux **when `GUObjectArray` is resolved** (via `dlsym` or `UE4SS_Addresses.ini`). On stripped binaries with no resolved addresses, only Lua mod top-level script code runs; C++ mods only get their constructor called.
 - **Keybinds**: `RegisterKeyBind`/`RegisterKeyBindAsync` (Lua) and the hot-reload key now work on Linux when a real TTY is attached (reads raw keypresses via `termios`). They do **not** work when there's no controlling terminal (e.g. under systemd/Docker without a pty allocated).
-- **No GUI**: GUI (Live View, in-game ImGui console, Lua Debugger tab, Profiler tab, Object/BP browser widgets) is disabled in the Linux build (headless mode only). Porting this requires replacing the Windows/DirectX11 backend with a GLFW-only backend, and would additionally require a running X11/Wayland display server (or Xvfb) even on a "headless" box — considered out of scope for now.
+- **GUI (Linux)**: The GUI is now enabled on Linux using the GLFW3/OpenGL3 backend. On headless servers (no `DISPLAY` environment variable), it automatically uses EGL with a hidden window for off-screen rendering. For interactive GUI access on a headless server, use `xvfb-run -a` or set up a virtual framebuffer (Xvfb). GUI settings can be configured in `UE4SS-settings.ini` under `[Debug]` with `GraphicsAPI` (0=DX11 Windows-only, 1=GLFW3/OpenGL3) and `RenderMode` (0=ExternalThread, 1=EngineTick, 2=GameViewportClientTick). To disable GUI entirely, build with `-DUE4SS_GUI_ENABLED=OFF`.
 - **No UVTD**: The VTable Dumper tool is not built on Linux (depends on the Windows-only `raw_pdb` library).
 - **UE Console Commands**: `RegisterConsoleCommandHandler`/`RegisterConsoleCommandGlobalHandler` (Lua) go through the `ProcessConsoleExec` hook, which is disabled by default (`HookProcessConsoleExec=false`) and requires a real caller of `UObject::ProcessConsoleExec` (e.g. RCON/admin commands the game already processes) — there is no interactive "type a command into stdin" console on Linux.
 - **Blueprint Mod Loader**: Blueprint mod loading is supported. On unstripped binaries, UE function addresses are resolved automatically via `dlsym`. On stripped binaries, addresses can be provided manually via `UE4SS_Addresses.ini`. See [Blueprint Modloader docs](docs/feature-overview/blueprint-modloader.md) for details.

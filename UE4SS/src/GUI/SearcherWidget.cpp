@@ -1,5 +1,8 @@
 #include <GUI/SearcherWidget.hpp>
 
+#ifdef __linux__
+#include <UE4SSCompat.hpp>
+#endif
 #include <imgui.h>
 
 namespace RC::GUI

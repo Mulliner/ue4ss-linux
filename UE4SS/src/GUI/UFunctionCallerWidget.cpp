@@ -216,23 +216,23 @@ namespace RC::GUI
     {
         if (auto as_struct_property = CastField<FStructProperty>(param.unreal_param); as_struct_property)
         {
-            ImGui::Text("%S (%S)", param.unreal_param->GetClass().GetName().c_str(), as_struct_property->GetStruct()->GetName().c_str());
+            ImGui::Text("%s (%s)", to_string(param.unreal_param->GetClass().GetName()).c_str(), to_string(as_struct_property->GetStruct()->GetName()).c_str());
         }
         else if (auto as_array_property = CastField<FArrayProperty>(param.unreal_param); as_array_property)
         {
-            ImGui::Text("%S (%S)", param.unreal_param->GetClass().GetName().c_str(), as_array_property->GetInner()->GetName().c_str());
+            ImGui::Text("%s (%s)", to_string(param.unreal_param->GetClass().GetName()).c_str(), to_string(as_array_property->GetInner()->GetName()).c_str());
         }
         else if (auto as_object_property = CastField<FObjectProperty>(param.unreal_param); as_object_property)
         {
-            ImGui::Text("%S (%S)", param.unreal_param->GetClass().GetName().c_str(), as_object_property->GetPropertyClass()->GetName().c_str());
+            ImGui::Text("%s (%s)", to_string(param.unreal_param->GetClass().GetName()).c_str(), to_string(as_object_property->GetPropertyClass()->GetName()).c_str());
         }
         else if (auto as_class_property = CastField<FClassProperty>(param.unreal_param); as_class_property)
         {
-            ImGui::Text("%S (%S)", param.unreal_param->GetClass().GetName().c_str(), as_class_property->GetMetaClass()->GetName().c_str());
+            ImGui::Text("%s (%s)", to_string(param.unreal_param->GetClass().GetName()).c_str(), to_string(as_class_property->GetMetaClass()->GetName()).c_str());
         }
         else
         {
-            ImGui::Text("%S", param.unreal_param->GetClass().GetName().c_str());
+            ImGui::Text("%s", to_string(param.unreal_param->GetClass().GetName()).c_str());
         }
     }
 

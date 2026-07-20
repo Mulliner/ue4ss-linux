@@ -2,6 +2,9 @@
 #include <locale>
 #include <sstream>
 
+#ifdef __linux__
+#include <UE4SSCompat.hpp>
+#endif
 #include <GUI/ConsoleOutputDevice.hpp>
 #include <UE4SSProgram.hpp>
 
@@ -29,7 +32,8 @@ namespace RC::Output
         }
         auto color = static_cast<Color::Color>(optional_arg);
         auto formatted_message = m_formatter(fmt_copy);
-        std::wstringstream stream{formatted_message};
+        // Use basic_stringstream with CharType to support both wchar_t (Windows) and char16_t (Linux)
+        std::basic_stringstream<CharType> stream{formatted_message};
         for (File::StringType line; std::getline(stream, line);)
         {
             UE4SSProgram::get_program().get_debugging_ui().get_console().add_line(line, color);

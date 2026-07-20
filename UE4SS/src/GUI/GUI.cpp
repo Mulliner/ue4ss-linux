@@ -1,17 +1,22 @@
 #include <GUI/GUI.hpp>
 
+#ifdef __linux__
+#include <UE4SSCompat.hpp>
+#endif
 #include <memory>
 
 #include <Profiler/Profiler.hpp>
 #include <DynamicOutput/DynamicOutput.hpp>
 #include <ExceptionHandling.hpp>
 #include <GUI/BPMods.hpp>
+#ifdef _WIN32
 #include <GUI/DX11.hpp>
+#include <GUI/Windows.hpp>
+#endif
 #include <GUI/Dumpers.hpp>
 #include <GUI/GLFW3_OpenGL3.hpp>
 #include <GUI/LuaDebugger.hpp>
 #include <GUI/Profilers.hpp>
-#include <GUI/Windows.hpp>
 #include <fonts/droidsansfallback.cpp>
 
 #include <UE4SSProgram.hpp>
@@ -487,7 +492,7 @@ namespace RC::GUI
         IMGUI_CHECKVERSION();
         ImGui::CreateContext();
         ImGuiIO& io = ImGui::GetIO();
-        m_imgui_ini_file = to_string(StringType{UE4SSProgram::get_program().get_working_directory()} + STR("\\imgui.ini"));
+        m_imgui_ini_file = to_string(StringType{UE4SSProgram::get_program().get_working_directory()} + STR("/imgui.ini"));
         io.IniFilename = m_imgui_ini_file.c_str();
 
         // Add .ini handle for UserData type
@@ -555,10 +560,12 @@ namespace RC::GUI
     {
         switch (backend)
         {
+#ifdef _WIN32
         case GfxBackend::DX11:
             m_gfx_backend = std::make_unique<Backend_DX11>();
             m_os_backend = std::make_unique<Backend_Windows>();
             break;
+#endif
         case GfxBackend::GLFW3_OpenGL3:
             m_gfx_backend = std::make_unique<Backend_GLFW3_OpenGL3>();
             m_os_backend = std::make_unique<Backend_NoOS>();

@@ -70,6 +70,9 @@ endif()
 # Filter out Windows-only entry point on Linux
 if(NOT WIN32)
     list(FILTER UE4SS_SOURCES EXCLUDE REGEX "main_ue4ss_rewritten")
+    # Filter out Windows-only GUI backends
+    list(FILTER UE4SS_SOURCES EXCLUDE REGEX "/GUI/DX11\\.cpp$")
+    list(FILTER UE4SS_SOURCES EXCLUDE REGEX "/GUI/Windows\\.cpp$")
 endif()
 
 # Create the main library
@@ -169,10 +172,11 @@ else()
         dl
         pthread
     )
-    # GUI/Input libs are optional on Linux (headless server mode)
-    # Uncomment these when GUI support is added for Linux
-    # find_package(glfw3 REQUIRED)
-    # target_link_libraries(UE4SS PUBLIC ImGui glfw glad)
+    if(UE4SS_GUI_ENABLED)
+        target_link_libraries(UE4SS PUBLIC ImGui glfw glad)
+        find_package(OpenGL REQUIRED)
+        target_link_libraries(UE4SS PUBLIC OpenGL::GL)
+    endif()
 endif()
 
 # ---------------------------------------------------------------------------
