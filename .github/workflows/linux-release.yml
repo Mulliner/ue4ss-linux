@@ -1,0 +1,140 @@
+name: Linux Release Publisher
+
+on:
+  workflow_dispatch:
+    inputs:
+      prerelease:
+        description: 'Mark as pre-release'
+        type: boolean
+        default: false
+      tag_name:
+        description: 'Release tag name (e.g. v3.0.1-linux)'
+        type: string
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: linux-release
+  cancel-in-progress: true
+
+jobs:
+  build-and-release:
+    name: Build and Publish Linux Release
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            cmake ninja-build pkg-config \
+            libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
+            libgl-dev libegl-dev libgles-dev \
+            gcc g++ binutils
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          components: rustfmt
+
+      - name: Configure CMake (Linux Shipping)
+        run: |
+          export CC=gcc
+          export CXX=g++
+          cmake -B build_linux \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Game__Shipping__Linux64 \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            -DUE4SS_GUI_ENABLED=ON \
+            -DUE4SS_INPUT_ENABLED=OFF \
+            -DUE4SS_PROFILERS=OFF \
+            -Wno-dev
+
+      - name: Build UE4SS (Shipping)
+        run: |
+          cmake --build build_linux --target UE4SS --verbose
+
+      - name: Strip and prepare artifacts
+        run: |
+          mkdir -p release
+          # Find the built .so file
+          SO_FILE=$(find build_linux -name "libUE4SS.so" -type f | head -1)
+          if [ -z "$SO_FILE" ]; then
+            echo "ERROR: libUE4SS.so not found!"
+            exit 1
+          fi
+          echo "Found: $SO_FILE"
+          ls -lh "$SO_FILE"
+          # Strip debug symbols
+          cp "$SO_FILE" release/libUE4SS-linux-x64.so
+          strip release/libUE4SS-linux-x64.so
+          ls -lh release/libUE4SS-linux-x64.so
+          # Generate build info
+          cat > release/BUILD_INFO.txt << EOF
+          UE4SS Linux Native Build
+          ========================
+          Tag: ${{ inputs.tag_name }}
+          Commit: $(git rev-parse HEAD)
+          Branch: $(git branch --show-current)
+          Build Type: Game__Shipping__Linux64
+          Compiler: $(gcc --version | head -1)
+          Build Host: ubuntu-24.04 (x86_64)
+          GUI: Enabled (GLFW3/OpenGL3)
+          Input: Disabled
+          Profilers: Disabled
+          Build Date: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          EOF
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-release-artifacts
+          path: release/
+          retention-days: 1
+          overwrite: true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag_name }}
+          prerelease: ${{ inputs.prerelease }}
+          target_commitish: linux-native
+          body: |
+            ## UE4SS ${{ inputs.tag_name }} — Linux Native Build
+
+            ### Features
+            - Full Linux native build with GUI support (GLFW3/OpenGL3 backend)
+            - Headless EGL mode for server environments (no DISPLAY required)
+            - Windows CRT secure functions compatibility layer
+            - Zero build warnings on Linux
+
+            ### Build Configuration
+            - Build Type: Game__Shipping__Linux64
+            - GUI: Enabled (GLFW3/OpenGL3)
+            - Input: Disabled
+            - Profilers: Disabled
+
+            ### Artifacts
+            - `libUE4SS-linux-x64.so` — Stripped shared library
+            - `BUILD_INFO.txt` — Build metadata
+
+            ### Usage
+            ```bash
+            LD_PRELOAD=./libUE4SS-linux-x64.so ./YourGameBinary
+            ```
+
+            ### Compatibility
+            - Built on Ubuntu 24.04 (x86_64)
+            - Requires: libGL, libEGL, libX11, libXrandr, libXinerama, libXcursor, libXi
+            - Engine Tick Hook: Auto-detected via dlsym (or manual override in UE4SS_Addresses.ini)
+          files: |
+            release/libUE4SS-linux-x64.so
+            release/BUILD_INFO.txt
