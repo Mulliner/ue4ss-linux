@@ -470,6 +470,8 @@ int main(int argc, char* argv[])
 
     cout << std::format("Export count: {}", exports.size()) << endl;
 
+#ifdef _WIN32
+    // Windows: Generate .def, .asm, and dllmain.cpp
     ofstream def_file((output_path / input_dll_name).replace_extension("def"));
     def_file << std::format("LIBRARY {}", fs::path(input_dll_name).replace_extension().string()) << endl;
     def_file << "EXPORTS" << endl;
@@ -697,6 +699,142 @@ int main(int argc, char* argv[])
     cpp_file << "}" << endl;
 
     cpp_file.close();
+#else
+    // Linux: Generate GCC export map and proxy_main.cpp using dlopen/dlsym
+    ofstream map_file((output_path / input_dll_name).replace_extension("map"));
+    map_file << "{\n  global:\n";
+    for (const auto& e : exports)
+    {
+        if (e.is_named)
+        {
+            map_file << std::format("    {};\n", e.name);
+        }
+    }
+    map_file << "  local: *;\n};\n";
+    map_file.close();
+
+    ofstream cpp_file(output_path / "proxy_main.cpp");
+    cpp_file << "#include <cstdint>\n";
+    cpp_file << "#include <cstring>\n";
+    cpp_file << "#include <cstdio>\n";
+    cpp_file << "#include <cstdlib>\n";
+    cpp_file << "#include <filesystem>\n";
+    cpp_file << "#include <fstream>\n";
+    cpp_file << "#include <string>\n";
+    cpp_file << "#include <dlfcn.h>\n";
+    cpp_file << "#include <unistd.h>\n";
+    cpp_file << "\n";
+    cpp_file << "namespace fs = std::filesystem;\n";
+    cpp_file << "\n";
+    cpp_file << "static void* g_original_lib = nullptr;\n";
+    cpp_file << std::format("static void* g_proxy_funcs[{}] = {{nullptr}};\n", exports.size());
+    cpp_file << "\n";
+
+    // Generate forwarder functions
+    for (const auto [e, index] : exports | views::enumerate)
+    {
+        if (e.is_named)
+        {
+            cpp_file << std::format("extern \"C\" __attribute__((visibility(\"default\"))) void* {}() {{\n", e.name);
+            cpp_file << std::format("    return g_proxy_funcs[{}];\n", index);
+            cpp_file << "}\n\n";
+        }
+    }
+
+    cpp_file << "static void setup_functions() {\n";
+    for (const auto [e, index] : exports | views::enumerate)
+    {
+        if (e.is_named)
+        {
+            cpp_file << std::format("    g_proxy_funcs[{}] = dlsym(g_original_lib, \"{}\");\n", index, e.name);
+        }
+        else
+        {
+            cpp_file << std::format("    // ordinal {} - cannot resolve by ordinal on Linux\n", e.ordinal);
+        }
+    }
+    cpp_file << "}\n\n";
+
+    cpp_file << "static void load_original_lib() {\n";
+    cpp_file << "    // Try common system library paths\n";
+    cpp_file << "    const char* search_paths[] = {\n";
+    cpp_file << "        \"/usr/lib/x86_64-linux-gnu/\",\n";
+    cpp_file << "        \"/usr/lib/\",\n";
+    cpp_file << "        \"/lib/x86_64-linux-gnu/\",\n";
+    cpp_file << "        \"/lib/\",\n";
+    cpp_file << "        nullptr\n";
+    cpp_file << "    };\n";
+    cpp_file << std::format("    std::string lib_name = \"{}\";\n", input_dll_name.string());
+    cpp_file << "    for (int i = 0; search_paths[i]; ++i) {\n";
+    cpp_file << "        std::string full_path = std::string(search_paths[i]) + lib_name;\n";
+    cpp_file << "        g_original_lib = dlopen(full_path.c_str(), RTLD_NOW);\n";
+    cpp_file << "        if (g_original_lib) return;\n";
+    cpp_file << "    }\n";
+    cpp_file << "    // Try LD_LIBRARY_PATH\n";
+    cpp_file << "    g_original_lib = dlopen(lib_name.c_str(), RTLD_NOW);\n";
+    cpp_file << "    if (!g_original_lib) {\n";
+    cpp_file << "        fprintf(stderr, \"UE4SS Proxy: Failed to load original library %s: %s\\n\", lib_name.c_str(), dlerror());\n";
+    cpp_file << "    }\n";
+    cpp_file << "}\n\n";
+
+    cpp_file << "static bool should_disable_ue4ss() {\n";
+    cpp_file << "    const char* disable_env = getenv(\"UE4SS_DISABLE\");\n";
+    cpp_file << "    return disable_env && disable_env[0] == '1';\n";
+    cpp_file << "}\n\n";
+
+    cpp_file << "static void load_ue4ss_lib() {\n";
+    cpp_file << "    // Get the directory of this shared library\n";
+    cpp_file << "    char exe_path[4096]{};\n";
+    cpp_file << "    ssize_t len = readlink(\"/proc/self/exe\", exe_path, sizeof(exe_path) - 1);\n";
+    cpp_file << "    if (len <= 0) return;\n";
+    cpp_file << "    exe_path[len] = '\\0';\n";
+    cpp_file << "    fs::path current_path = fs::path(exe_path).parent_path();\n";
+    cpp_file << "\n";
+    cpp_file << "    // Check UE4SS_DISABLE env var\n";
+    cpp_file << "    if (should_disable_ue4ss()) return;\n";
+    cpp_file << "\n";
+    cpp_file << "    // Check for override.txt\n";
+    cpp_file << "    fs::path override_file = current_path / \"override.txt\";\n";
+    cpp_file << "    if (fs::exists(override_file)) {\n";
+    cpp_file << "        std::ifstream ofs(override_file);\n";
+    cpp_file << "        std::string override_path;\n";
+    cpp_file << "        if (std::getline(ofs, override_path)) {\n";
+    cpp_file << "            fs::path p(override_path);\n";
+    cpp_file << "            if (!p.is_absolute()) p = current_path / override_path;\n";
+    cpp_file << "            p = p / \"libUE4SS.so\";\n";
+    cpp_file << "            void* h = dlopen(p.c_str(), RTLD_NOW);\n";
+    cpp_file << "            if (h) return;\n";
+    cpp_file << "        }\n";
+    cpp_file << "    }\n";
+    cpp_file << "\n";
+    cpp_file << "    // Try ue4ss directory\n";
+    cpp_file << "    fs::path ue4ss_path = current_path / \"ue4ss\" / \"libUE4SS.so\";\n";
+    cpp_file << "    void* h = dlopen(ue4ss_path.c_str(), RTLD_NOW);\n";
+    cpp_file << "    if (!h) {\n";
+    cpp_file << "        // Try current directory\n";
+    cpp_file << "        h = dlopen(\"libUE4SS.so\", RTLD_NOW);\n";
+    cpp_file << "    }\n";
+    cpp_file << "    if (!h) {\n";
+    cpp_file << "        fprintf(stderr, \"UE4SS Proxy: Failed to load libUE4SS.so: %s\\n\", dlerror());\n";
+    cpp_file << "    }\n";
+    cpp_file << "}\n\n";
+
+    cpp_file << "__attribute__((constructor)) static void proxy_init() {\n";
+    cpp_file << "    load_original_lib();\n";
+    cpp_file << "    if (g_original_lib) {\n";
+    cpp_file << "        setup_functions();\n";
+    cpp_file << "        load_ue4ss_lib();\n";
+    cpp_file << "    }\n";
+    cpp_file << "}\n\n";
+
+    cpp_file << "__attribute__((destructor)) static void proxy_fini() {\n";
+    cpp_file << "    if (g_original_lib) {\n";
+    cpp_file << "        dlclose(g_original_lib);\n";
+    cpp_file << "        g_original_lib = nullptr;\n";
+    cpp_file << "    }\n";
+    cpp_file << "}\n";
+    cpp_file.close();
+#endif
 
     cout << "Finished generating!" << endl;
 
