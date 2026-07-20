@@ -70,7 +70,7 @@ namespace RC
             // The default message will be used which can't be too small since it's calculated at compile-time
             if (msg_len < sizeof(m_message))
             {
-                sprintf_s(m_message, sizeof(m_message), fmt, args...);
+                snprintf(m_message, sizeof(m_message), fmt, args...);
             }
         }
 

@@ -42,7 +42,7 @@ namespace RC::Parser::Experimental
 
         auto exec(const Parser::Token& token, const CharType* start_of_token, size_t current_cursor_location, Tokenizer& tokenizer) -> int override
         {
-            printf_s("TokenMustEndWithOppositeToken::exec [%S]\n", token.to_string().c_str());
+            printf("TokenMustEndWithOppositeToken::exec [%S]\n", token.to_string().c_str());
             return 0;
         }
 
@@ -61,7 +61,7 @@ namespace RC::Parser::Experimental
 
         auto exec(const Parser::Token& token, const CharType* start_of_token, size_t current_cursor_location, Tokenizer& tokenizer) -> int override
         {
-            printf_s("TokenMustHaveCharsBeforeEnd::exec [%S]\n", token.to_string().c_str());
+            printf("TokenMustHaveCharsBeforeEnd::exec [%S]\n", token.to_string().c_str());
             return 0;
         }
 
