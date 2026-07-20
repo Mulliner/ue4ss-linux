@@ -444,6 +444,18 @@ namespace RC::Unreal::UnrealInitializer
         bool ps_scan(PsCtx& ctx, PsScanResults& results);
     }
 
+#ifdef __linux__
+    // Stub implementation for Linux — patternsleuth (Rust) is not built on Linux.
+    // ps_scan is never called at runtime because all scan overrides are set,
+    // but the linker needs the symbol to be defined.
+    extern "C" bool ps_scan(PsCtx& ctx, PsScanResults& results)
+    {
+        (void)ctx;
+        (void)results;
+        return false;
+    }
+#endif
+
     auto ScanGame() -> void
     {
         enum class OutputErrorsByThrowing { Yes, No };
