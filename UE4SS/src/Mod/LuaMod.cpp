@@ -1880,12 +1880,20 @@ Overloads:
             });
 
             lua.register_function("DumpStaticMeshes", []([[maybe_unused]] const LuaMadeSimple::Lua& lua) -> int {
+#ifdef HAS_GUI
                 GUI::Dumpers::call_generate_static_mesh_file();
+#else
+                Output::send<LogLevel::Warning>(STR("DumpStaticMeshes is not available without GUI enabled\n"));
+#endif
                 return 0;
             });
 
             lua.register_function("DumpAllActors", []([[maybe_unused]] const LuaMadeSimple::Lua& lua) -> int {
+#ifdef HAS_GUI
                 GUI::Dumpers::call_generate_all_actor_file();
+#else
+                Output::send<LogLevel::Warning>(STR("DumpAllActors is not available without GUI enabled\n"));
+#endif
                 return 0;
             });
 
