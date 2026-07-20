@@ -16,10 +16,10 @@ All types of contributions are encouraged and valued. This guide outlines the pr
 
 ## Reporting Issues
 
-Before you ask a question, it is best to search for existing [issues](https://github.com/UE4SS-RE/RE-UE4SS/issues) and read the available [documentation](https://docs.ue4ss.com/).
+Before you ask a question, it is best to search for existing [issues](https://github.com/XarminaEu/ue4ss-linux/issues) and read the available documentation.
 
 If you still need clarification:
-- Open an [issue](https://github.com/UE4SS-RE/RE-UE4SS/issues) using the correct template
+- Open an [issue](https://github.com/XarminaEu/ue4ss-linux/issues) using the correct template
 - Provide as much context as you can about what you're experiencing
 - Provide project and platform versions (OS, etc.)
 - If the issue is build related, provide toolchain information (compiler version, etc.) 
@@ -125,7 +125,7 @@ The upgrade guide is organized chronologically with the most recent version at t
 ## License
 
 ### RE-UE4SS License
-By contributing to RE-UE4SS, you agree that your contributions will be licensed under the [MIT licence](https://github.com/UE4SS-RE/RE-UE4SS/blob/main/LICENSE)
+By contributing to this Linux port, you agree that your contributions will be licensed under the [MIT licence](https://github.com/XarminaEu/ue4ss-linux/blob/main/LICENSE)
 
 ### UEPseudo Code Licensing
 UEPseudo code is subject to Epic Games' licensing terms.
