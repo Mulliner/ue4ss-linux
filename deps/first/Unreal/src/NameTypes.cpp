@@ -166,7 +166,7 @@ namespace RC::Unreal
     {
         const uint32 Entry = GetDisplayIndex().ToUnstableInt();
         auto String = FName(Entry).ToString();
-        std::memcpy(OutName, &String[0], String.size() * sizeof(File::StringType::size_type));
+        std::memcpy(OutName, &String[0], String.size() * sizeof(File::StringType::value_type));
         return static_cast<uint32>(String.size());
     }
 }

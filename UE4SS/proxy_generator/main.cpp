@@ -105,7 +105,7 @@ struct IMAGE_OPTIONAL_HEADER64 {
     uint32_t SizeOfUninitializedData;
     uint32_t AddressOfEntryPoint;
     uint32_t BaseOfCode;
-    uint32_t ImageBase;
+    uint64_t ImageBase;
     uint32_t SectionAlignment;
     uint32_t FileAlignment;
     uint16_t MajorOperatingSystemVersion;
@@ -173,16 +173,21 @@ static constexpr uint32_t IMAGE_DIRECTORY_ENTRY_EXPORT = 0;
 static constexpr uint16_t IMAGE_NT_OPTIONAL_HDR32_MAGIC = 0x10b;
 static constexpr uint16_t IMAGE_NT_OPTIONAL_HDR64_MAGIC = 0x20b;
 
-static auto rva_to_offset(const uint8_t* data, uint32_t rva, const IMAGE_SECTION_HEADER* sections, uint16_t num_sections) -> size_t
+static auto rva_to_offset(const uint8_t* data, size_t data_size, uint32_t rva, const IMAGE_SECTION_HEADER* sections, uint16_t num_sections) -> size_t
 {
     for (uint16_t i = 0; i < num_sections; i++)
     {
         if (rva >= sections[i].VirtualAddress && rva < sections[i].VirtualAddress + sections[i].VirtualSize)
         {
-            return sections[i].PointerToRawData + (rva - sections[i].VirtualAddress);
+            size_t offset = sections[i].PointerToRawData + (rva - sections[i].VirtualAddress);
+            if (offset >= data_size)
+            {
+                return SIZE_MAX;
+            }
+            return offset;
         }
     }
-    return rva;
+    return SIZE_MAX;
 }
 #endif
 
@@ -275,6 +280,12 @@ std::vector<ExportFunction> DumpExports(const fs::path& dll_path)
         return {};
     }
 
+    if (dos_header->e_lfanew <= 0 || (size_t)dos_header->e_lfanew + sizeof(IMAGE_NT_HEADERS32) > size)
+    {
+        cerr << "Invalid PE file: e_lfanew out of bounds\n";
+        return {};
+    }
+
     auto* nt_headers = (IMAGE_NT_HEADERS32*)(data + dos_header->e_lfanew);
     if (nt_headers->Signature != 0x00004550) // "PE\0\0"
     {
@@ -299,18 +310,37 @@ std::vector<ExportFunction> DumpExports(const fs::path& dll_path)
         sections = (IMAGE_SECTION_HEADER*)((uint8_t*)nt_headers + sizeof(IMAGE_NT_HEADERS32));
     }
 
+    // Validate section headers are within bounds
+    size_t sections_end = (uint8_t*)sections - data + (size_t)num_sections * sizeof(IMAGE_SECTION_HEADER);
+    if (sections_end > size)
+    {
+        cerr << "Invalid PE file: section headers out of bounds\n";
+        return {};
+    }
+
     if (export_dir_rva == 0)
     {
         cerr << "PE file has no export directory\n";
         return {};
     }
 
-    size_t export_offset = rva_to_offset(data, export_dir_rva, sections, num_sections);
+    size_t export_offset = rva_to_offset(data, size, export_dir_rva, sections, num_sections);
+    if (export_offset == SIZE_MAX || export_offset + sizeof(IMAGE_EXPORT_DIRECTORY) > size)
+    {
+        cerr << "Invalid PE file: export directory out of bounds\n";
+        return {};
+    }
     auto* export_directory = (IMAGE_EXPORT_DIRECTORY*)(data + export_offset);
 
-    size_t names_offset = rva_to_offset(data, export_directory->AddressOfNames, sections, num_sections);
-    size_t functions_offset = rva_to_offset(data, export_directory->AddressOfFunctions, sections, num_sections);
-    size_t ordinals_offset = rva_to_offset(data, export_directory->AddressOfNameOrdinals, sections, num_sections);
+    size_t names_offset = rva_to_offset(data, size, export_directory->AddressOfNames, sections, num_sections);
+    size_t functions_offset = rva_to_offset(data, size, export_directory->AddressOfFunctions, sections, num_sections);
+    size_t ordinals_offset = rva_to_offset(data, size, export_directory->AddressOfNameOrdinals, sections, num_sections);
+
+    if (names_offset == SIZE_MAX || functions_offset == SIZE_MAX || ordinals_offset == SIZE_MAX)
+    {
+        cerr << "Invalid PE file: export arrays out of bounds\n";
+        return {};
+    }
 
     auto* name_rvas = (uint32_t*)(data + names_offset);
     auto* function_rvas = (uint32_t*)(data + functions_offset);
@@ -321,7 +351,12 @@ std::vector<ExportFunction> DumpExports(const fs::path& dll_path)
 
     for (size_t i = 0; i < export_directory->NumberOfNames; i++)
     {
-        size_t name_offset = rva_to_offset(data, name_rvas[i], sections, num_sections);
+        size_t name_offset = rva_to_offset(data, size, name_rvas[i], sections, num_sections);
+        if (name_offset == SIZE_MAX || name_offset >= size)
+        {
+            cerr << "Invalid PE file: export name RVA out of bounds\n";
+            break;
+        }
         std::string export_name = (char*)(data + name_offset);
         uint16_t ordinal = ordinals[i] + 1;
 

@@ -21,7 +21,11 @@ namespace RC
         auto now = std::chrono::system_clock::now();
         auto now_c = std::chrono::system_clock::to_time_t(now);
         std::tm tm_buf{};
+#ifdef _WIN32
+        localtime_s(&tm_buf, &now_c);
+#else
         localtime_r(&now_c, &tm_buf);
+#endif
 
         // Convert UE4SS-style format ({:%Y-%m-%d %H:%M:%S}) to strftime format
         std::string fmt_str(format.begin(), format.end());
