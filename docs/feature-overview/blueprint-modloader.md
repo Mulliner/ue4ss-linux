@@ -1,6 +1,14 @@
 # Blueprint Modloader
 
-> **Note:** Blueprint mod loading is not available on the Linux build. It requires resolved UE function addresses that are not available on stripped Linux binaries. Only Lua mods and C++ mods (as `.so` files) are supported on Linux.
+> **Linux Status:** Blueprint mod loading is included in the Linux build but has significant limitations:
+> - It requires UE function addresses to be resolved (GUObjectArray, ProcessInternal, etc.)
+> - On **stripped Linux binaries** (most dedicated server builds), these symbols cannot be found via `dlsym`, so blueprint mod loading **will not work**
+> - On **unstripped binaries** or when manual address overrides are provided, blueprint mod loading can work
+> - The following hooks must be enabled in `UE4SS-settings.ini`:
+>   - `HookLoadMap=true`
+>   - `HookBeginPlay=true`
+>   - `HookProcessInternal=true`
+> - Blueprint `.pak` files must be placed in `Content/Paks/LogicMods/`
 
 As our BP system is based on RussellJ's, this tutorial video is applicable for creating a blueprint mod for UE4SS:
 

@@ -7,8 +7,8 @@ local function Log(Message, OnlyLogIfVerbose)
     print("[BPModLoaderMod] " .. Message)
 end
 
-package.path = '.\\Mods\\ModLoaderMod\\?.lua;' .. package.path
-package.path = '.\\Mods\\ModLoaderMod\\BPMods\\?.lua;' .. package.path
+package.path = './Mods/ModLoaderMod/?.lua;' .. package.path
+package.path = './Mods/ModLoaderMod/BPMods/?.lua;' .. package.path
 
 Mods = {}
 local OrderedMods = {}
