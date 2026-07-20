@@ -256,6 +256,7 @@ namespace RC
                     default_settings << "bEnableSeachByMemoryAddress=false\n";
                     default_settings << "DefaultExecuteInGameThreadMethod=GameThread\n";
                     default_settings << "DiscordWebhookURL=\n";
+                    default_settings << "DebugLogLevel=0\n";
                     default_settings << "[Debug]\n";
                     default_settings << "DebugConsoleEnabled=false\n";
                     default_settings << "SimpleConsoleEnabled=true\n";
@@ -365,6 +366,9 @@ namespace RC
             {
                 settings_manager.deserialize(m_settings_path_and_file);
                 UE4SS_DBG( "[UE4SS] Constructor: settings deserialized.\n");
+#ifdef __linux__
+                UE4SSDebug::set_debug_level(static_cast<int>(settings_manager.General.DebugLogLevel));
+#endif
             }
             catch (std::exception& e)
             {

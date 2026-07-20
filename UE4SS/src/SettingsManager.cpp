@@ -90,12 +90,12 @@ namespace RC
         CrashDump.EnableDumping = false;
         CrashDump.FullMemoryDump = false;
 
-        // Read DiscordWebhookURL from INI file manually (simple string search)
+        // Read DiscordWebhookURL and DebugLogLevel from INI file manually (simple string search)
         {
             std::ifstream ini_file(file_name);
             if (ini_file.is_open())
             {
-                UE4SS_DBG( "[UE4SS] SettingsManager: INI file opened for DiscordWebhookURL scan\n");
+                UE4SS_DBG( "[UE4SS] SettingsManager: INI file opened for scanning\n");
                 std::string line;
                 while (std::getline(ini_file, line))
                 {
@@ -116,13 +116,22 @@ namespace RC
                         {
                             UE4SS_DBG( "[UE4SS] SettingsManager: DiscordWebhookURL found in INI but is EMPTY - please set it in UE4SS-settings.ini\n");
                         }
-                        break;
+                    }
+
+                    // Look for DebugLogLevel= in the line
+                    pos = line.find("DebugLogLevel=");
+                    if (pos != std::string::npos)
+                    {
+                        std::string val = line.substr(pos + 14);
+                        while (!val.empty() && (val.front() == ' ' || val.front() == '\t')) val.erase(val.begin());
+                        while (!val.empty() && (val.back() == ' ' || val.back() == '\t' || val.back() == '\r')) val.pop_back();
+                        try { General.DebugLogLevel = std::stoll(val); } catch (...) {}
                     }
                 }
             }
             else
             {
-                UE4SS_DBG( "[UE4SS] SettingsManager: could not open INI file for DiscordWebhookURL scan: %s\n", file_name.string().c_str());
+                UE4SS_DBG( "[UE4SS] SettingsManager: could not open INI file: %s\n", file_name.string().c_str());
             }
         }
 

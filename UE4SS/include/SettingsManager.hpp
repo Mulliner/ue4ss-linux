@@ -45,6 +45,7 @@ namespace RC
             GameThreadExecutionMethod DefaultExecuteInGameThreadMethod{GameThreadExecutionMethod::EngineTick};
             Unreal::UnrealInitializer::FNameToStringMethod DefaultFNameToStringMethod{Unreal::UnrealInitializer::FNameToStringMethod::Scan};
             StringType DiscordWebhookURL{};
+            int64_t DebugLogLevel{0};
         } General;
 
         struct SectionEngineVersionOverride
