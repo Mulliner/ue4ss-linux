@@ -1,5 +1,4 @@
 # CI workflow for Linux native builds and Windows cross-compilation builds
-# This workflow does NOT require the UEPseudo submodule (deps/first/Unreal)
 # Linux builds include GUI (GLFW/OpenGL3) with headless EGL support
 
 name: Linux & Cross-Compile CI
@@ -48,8 +47,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            cmake ninja-build \
-            libfmt-dev \
+            cmake ninja-build pkg-config \
             libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
             libgl-dev libegl-dev libgles2-dev \
             ${{ matrix.compiler == 'clang' && 'clang lld llvm' || 'gcc g++' }}
@@ -58,6 +56,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
+          components: rustfmt
 
       - name: Configure CMake (Linux Native)
         run: |
@@ -69,19 +68,38 @@ jobs:
             export CXX=g++
           fi
 
+          # Print tool versions for debugging
+          $CC --version
+          $CXX --version
+          cmake --version
+          cargo --version
+          rustc --version
+
           cmake -B build_linux_${{ matrix.config }}_${{ matrix.compiler }} \
             -G Ninja \
             -DCMAKE_BUILD_TYPE=Game__${{ matrix.config }}__Linux64 \
             -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
             -DUE4SS_GUI_ENABLED=ON \
             -DUE4SS_INPUT_ENABLED=OFF \
-            -DUE4SS_PROFILERS=OFF
+            -DUE4SS_PROFILERS=OFF \
+            -DCMAKE_MESSAGE_LOG_LEVEL=VERBOSE \
+            -Wno-dev 2>&1 | tee cmake_configure.log
+
+      - name: Upload configure log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cmake-configure-log-${{ matrix.compiler }}-${{ matrix.config }}
+          path: cmake_configure.log
+          retention-days: 7
+          overwrite: true
 
       - name: Build UE4SS (Linux Native)
         run: |
           cmake --build build_linux_${{ matrix.config }}_${{ matrix.compiler }} --target UE4SS --verbose
 
       - name: Upload build artifacts
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: linux-${{ matrix.compiler }}-${{ matrix.config }}
@@ -95,6 +113,7 @@ jobs:
   build-windows-cross:
     name: Windows Cross-Compile (xwin)
     runs-on: ubuntu-22.04
+    if: ${{ vars.ENABLE_WINDOWS_CROSS == 'true' }}
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
