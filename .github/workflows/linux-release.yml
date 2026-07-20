@@ -75,7 +75,7 @@ jobs:
           ls -lh "$SO_FILE"
           # Strip debug symbols
           cp "$SO_FILE" release/libUE4SS-linux-x64.so
-          strip release/libUE4SS-linux-x64.so
+          strip --strip-debug release/libUE4SS-linux-x64.so
           ls -lh release/libUE4SS-linux-x64.so
           # Generate build info
           cat > release/BUILD_INFO.txt << EOF
