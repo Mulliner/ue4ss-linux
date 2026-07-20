@@ -233,6 +233,17 @@ static auto thread_dll_start() -> void
             return;
         }
 
+        // Print copyright banner only for the actual game process
+        UE4SS_LOG("%s\n", COPYRIGHT_BANNER);
+
+        // Anti-tamper check
+        if (!verify_copyright())
+        {
+            UE4SS_ERR("[UE4SS] WARNING: Copyright verification failed. This binary may have been tampered with.\n");
+            UE4SS_ERR("[UE4SS] Original source: https://github.com/XarminaEu/ue4ss-linux\n");
+            UE4SS_ERR("[UE4SS] Copyright (c) 2024-2026 rl-dev.de — https://rl-dev.de\n");
+        }
+
         wait_for_game_ready();
 
         auto module_path = get_module_path();
@@ -300,17 +311,6 @@ static auto thread_dll_start() -> void
 __attribute__((constructor))
 static void ue4ss_linux_init()
 {
-    // Print copyright banner on startup
-    UE4SS_LOG("%s\n", COPYRIGHT_BANNER);
-
-    // Anti-tamper check
-    if (!verify_copyright())
-    {
-        UE4SS_ERR("[UE4SS] WARNING: Copyright verification failed. This binary may have been tampered with.\n");
-        UE4SS_ERR("[UE4SS] Original source: https://github.com/XarminaEu/ue4ss-linux\n");
-        UE4SS_ERR("[UE4SS] Copyright (c) 2024-2026 rl-dev.de — https://rl-dev.de\n");
-    }
-
     UE4SS_DBG("[UE4SS] Library loaded via LD_PRELOAD, starting initialization thread...\n");
     std::thread{thread_dll_start}.detach();
 }
