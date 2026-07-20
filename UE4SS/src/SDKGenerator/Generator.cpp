@@ -549,8 +549,12 @@ namespace RC::UEGenerator
                 }
 
                 // The '\\?\' at the beginning of the string unlocks path size restriction from MAX_PATH to 32k
+#ifdef _WIN32
                 std::filesystem::path directory_to_generate_in = std::filesystem::path("\\\\?\\");
                 directory_to_generate_in += (m_directory_to_generate_in);
+#else
+                std::filesystem::path directory_to_generate_in = m_directory_to_generate_in;
+#endif
 
                 File::StringType ext = specification.get_file_extension();
                 std::filesystem::path primary_file_path_and_name = directory_to_generate_in;

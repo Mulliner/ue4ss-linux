@@ -108,11 +108,11 @@ namespace RC::UEGenerator
         });
 
         // Retrieve JSON as a string.
-        auto uaapifile = open(StringType{UE4SSProgram::get_program().get_working_directory()} + STR("\\UAssetAPITMapOverrides.json"),
+        auto uaapifile = open(StringType{UE4SSProgram::get_program().get_working_directory()} + STR("/UAssetAPITMapOverrides.json"),
                               File::OpenFor::Writing,
                               File::OverwriteExistingFile::Yes,
                               File::CreateIfNonExistent::Yes);
-        auto fmodelfile = open(StringType{UE4SSProgram::get_program().get_working_directory()} + STR("\\FModelTMapOverrides.json"),
+        auto fmodelfile = open(StringType{UE4SSProgram::get_program().get_working_directory()} + STR("/FModelTMapOverrides.json"),
                                File::OpenFor::Writing,
                                File::OverwriteExistingFile::Yes,
                                File::CreateIfNonExistent::Yes);

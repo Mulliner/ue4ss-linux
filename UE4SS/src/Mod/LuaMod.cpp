@@ -1846,7 +1846,7 @@ Overloads:
                 {
                     lua.throw_error("Couldn't dump objects and properties because the pointer to 'Mod' was nullptr");
                 }
-                UE4SSProgram::dump_all_objects_and_properties(mod->m_program.get_object_dumper_output_directory() + STR("\\") +
+                UE4SSProgram::dump_all_objects_and_properties(mod->m_program.get_object_dumper_output_directory() + STR("/") +
                                                               UE4SSProgram::m_object_dumper_file_name);
                 return 0;
             });
@@ -1858,7 +1858,7 @@ Overloads:
                     lua.throw_error("Couldn't generate SDK because the pointer to 'Mod' was nullptr");
                 }
                 File::StringType working_dir{mod->m_program.get_working_directory()};
-                mod->m_program.generate_cxx_headers(working_dir + STR("\\CXXHeaderDump"));
+                mod->m_program.generate_cxx_headers(working_dir + STR("/CXXHeaderDump"));
                 return 0;
             });
 
@@ -1869,7 +1869,7 @@ Overloads:
                     lua.throw_error("Couldn't generate lua types because the pointer to 'Mod' was nullptr");
                 }
                 File::StringType working_dir{mod->m_program.get_working_directory()};
-                UE4SSProgram::get_program().generate_lua_types(working_dir + STR("\\Mods\\shared\\types"));
+                UE4SSProgram::get_program().generate_lua_types(working_dir + STR("/Mods/shared/types"));
                 return 0;
             });
 
