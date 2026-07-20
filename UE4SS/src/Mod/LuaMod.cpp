@@ -700,30 +700,34 @@ namespace RC
     LuaMod::LuaMod(UE4SSProgram& program, StringType&& mod_name, StringType&& mod_path)
         : Mod(program, std::move(mod_name), std::move(mod_path)), m_lua(LuaMadeSimple::new_state())
     {
-        // First check for "Scripts" (capital S)
-        std::filesystem::path scripts_path = m_mod_path / STR("Scripts");
-
-        // If not found, try with lowercase "scripts"
-        if (!std::filesystem::exists(scripts_path))
+        // Case-insensitive search for "scripts" directory (Scripts, scripts, SCRIPTS, etc.)
+        std::filesystem::path scripts_path;
+        bool scripts_found = false;
+        std::error_code ec;
+        for (const auto& entry : std::filesystem::directory_iterator(m_mod_path, ec))
         {
-            std::filesystem::path alt_scripts_path = m_mod_path / STR("scripts");
-            if (std::filesystem::exists(alt_scripts_path))
+            if (entry.is_directory())
             {
-                scripts_path = alt_scripts_path;
+                auto name = entry.path().filename().string();
+                std::transform(name.begin(), name.end(), name.begin(), ::tolower);
+                if (name == "scripts")
+                {
+                    scripts_path = entry.path();
+                    scripts_found = true;
+                    break;
+                }
             }
         }
 
-        m_scripts_path = scripts_path;
-
-#ifdef __linux__
-        UE4SS_DBG( "[UE4SS] LuaMod constructor: mod '%s' scripts_path='%s' exists=%d\n",
-                std::string(mod_name.begin(), mod_name.end()).c_str(),
-                m_scripts_path.string().c_str(), (int)std::filesystem::exists(m_scripts_path));
-#endif
-
-        if (!std::filesystem::exists(m_scripts_path))
+        if (scripts_found)
         {
-            Output::send<LogLevel::Error>(STR("Mod path doesn't exist {}\n"), ensure_str(m_scripts_path));
+            m_scripts_path = scripts_path;
+            Output::send(STR("Mod '{}': Scripts directory found at {}\n"), ensure_str(mod_name), ensure_str(m_scripts_path));
+        }
+        else
+        {
+            m_scripts_path = m_mod_path / STR("Scripts");
+            Output::send<LogLevel::Error>(STR("Mod '{}': No 'Scripts' directory found in {}\n"), ensure_str(mod_name), ensure_str(m_mod_path));
             set_installable(false);
             return;
         }
@@ -6029,31 +6033,45 @@ Overloads:
 #endif
 
             // Use the scripts path that was already determined in the constructor
-            std::filesystem::path main_script_path = m_scripts_path / STR("main.lua");
-
-#ifdef __linux__
-            UE4SS_DBG( "[UE4SS] start_mod: '%s' main_script_path='%s' exists=%d\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str(), main_script_path.string().c_str(), (int)std::filesystem::exists(main_script_path));
-#endif
-
-            if (std::filesystem::exists(main_script_path))
+            // Case-insensitive search for main.lua (main.lua, Main.lua, MAIN.LUA, etc.)
+            std::filesystem::path main_script_path;
+            bool main_script_found = false;
             {
-#ifdef __linux__
-                UE4SS_DBG( "[UE4SS] start_mod: '%s' calling load_and_execute_script()...\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
-#endif
+                std::error_code ec;
+                for (const auto& entry : std::filesystem::directory_iterator(m_scripts_path, ec))
+                {
+                    if (entry.is_regular_file())
+                    {
+                        auto name = entry.path().filename().string();
+                        std::transform(name.begin(), name.end(), name.begin(), ::tolower);
+                        if (name == "main.lua")
+                        {
+                            main_script_path = entry.path();
+                            main_script_found = true;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if (!main_script_found)
+            {
+                main_script_path = m_scripts_path / STR("main.lua");
+            }
+
+            if (main_script_found && std::filesystem::exists(main_script_path))
+            {
+                Output::send(STR("Mod '{}': Loading main script: {}\n"), ensure_str(m_mod_name), ensure_str(main_script_path));
                 if (!load_and_execute_script(main_script_path))
                 {
-                    Output::send<LogLevel::Error>(STR("Failed to execute main script: {}\n"), ensure_str(main_script_path));
+                    Output::send<LogLevel::Error>(STR("Mod '{}': Failed to execute main script: {}\n"), ensure_str(m_mod_name), ensure_str(main_script_path));
                 }
-#ifdef __linux__
-                UE4SS_DBG( "[UE4SS] start_mod: '%s' load_and_execute_script() done.\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
-#endif
             }
             else
             {
-                // This case implies m_scripts_path itself is valid, but main.lua is missing
                 Output::send<LogLevel::Error>(
-                        STR("Main script 'main.lua' not found in scripts directory: {} -- Ensure your script file uses the correct casing.\n"),
-                        ensure_str(m_scripts_path));
+                        STR("Mod '{}': Main script 'main.lua' not found in scripts directory: {} -- Ensure your script file uses the correct casing.\n"),
+                        ensure_str(m_mod_name), ensure_str(m_scripts_path));
             }
 #ifdef __linux__
             UE4SS_DBG( "[UE4SS] start_mod: '%s' completed successfully.\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());

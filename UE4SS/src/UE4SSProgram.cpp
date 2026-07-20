@@ -1749,11 +1749,8 @@ namespace RC
                 }
                 else if (dynamic_cast<LuaMod*>(mod.get()))
                 {
-#ifdef __linux__
-                    filesystem_watcher.add_dir(mod->get_path() / "scripts");
-#else
-                    filesystem_watcher.add_dir(mod->get_path() / "Scripts");
-#endif
+                    auto* lua_mod = dynamic_cast<LuaMod*>(mod.get());
+                    filesystem_watcher.add_dir(lua_mod->get_scripts_path());
                 }
             }
             filesystem_watcher.start_async_polling([&](const std::filesystem::path& file, bool match_all) {
@@ -1958,17 +1955,41 @@ namespace RC
                 {
                     auto mod_name = ensure_str(sub_directory.path().stem());
 #ifdef __linux__
-                    UE4SS_DBG( "[UE4SS] setup_mods: found directory '%s' (full path: %s)\n", std::string(mod_name.begin(), mod_name.end()).c_str(), sub_directory.path().string().c_str());
-                    UE4SS_DBG( "[UE4SS] setup_mods: has scripts/ = %s, has libs/ = %s\n", std::filesystem::exists(sub_directory.path() / "scripts") ? "yes" : "no", std::filesystem::exists(sub_directory.path() / "libs") ? "yes" : "no");
+                    auto has_scripts_dir = [](const std::filesystem::path& mod_path) -> bool {
+                        for (const auto& entry : std::filesystem::directory_iterator(mod_path))
+                        {
+                            if (entry.is_directory())
+                            {
+                                auto name = entry.path().filename().string();
+                                std::transform(name.begin(), name.end(), name.begin(), ::tolower);
+                                if (name == "scripts") return true;
+                            }
+                        }
+                        return false;
+                    };
+                    auto has_libs_dir = [](const std::filesystem::path& mod_path) -> bool {
+                        for (const auto& entry : std::filesystem::directory_iterator(mod_path))
+                        {
+                            if (entry.is_directory())
+                            {
+                                auto name = entry.path().filename().string();
+                                std::transform(name.begin(), name.end(), name.begin(), ::tolower);
+                                if (name == "libs") return true;
+                            }
+                        }
+                        return false;
+                    };
+                    bool is_lua_mod = has_scripts_dir(sub_directory.path());
+                    bool is_cpp_mod = has_libs_dir(sub_directory.path());
+                    Output::send(STR("Found mod directory: {} (Lua: {}, C++: {})\n"), ensure_str(mod_name), is_lua_mod ? STR("yes") : STR("no"), is_cpp_mod ? STR("yes") : STR("no"));
+#else
+                    bool is_lua_mod = std::filesystem::exists(sub_directory.path() / "Scripts");
+                    bool is_cpp_mod = std::filesystem::exists(sub_directory.path() / "dlls");
 #endif
                     // Create the mod but don't install it yet
-                    if (!find_mod_by_name<LuaMod>(mod_name) && std::filesystem::exists(sub_directory.path() / "scripts"))
+                    if (!find_mod_by_name<LuaMod>(mod_name) && is_lua_mod)
                         m_mods.emplace_back(std::make_unique<LuaMod>(*this, std::move(mod_name), ensure_str(sub_directory.path())));
-#ifdef __linux__
-                    if (!find_mod_by_name<CppMod>(mod_name) && std::filesystem::exists(sub_directory.path() / "libs"))
-#else
-                    if (!find_mod_by_name<CppMod>(mod_name) && std::filesystem::exists(sub_directory.path() / "dlls"))
-#endif
+                    if (!find_mod_by_name<CppMod>(mod_name) && is_cpp_mod)
                         m_mods.emplace_back(std::make_unique<CppMod>(*this, std::move(mod_name), ensure_str(sub_directory.path())));
                 }
             }
@@ -2214,23 +2235,23 @@ namespace RC
                     auto mod = UE4SSProgram::find_mod_by_name<ModType>(mod_name, UE4SSProgram::IsInstalled::Yes);
                     if (!mod || !dynamic_cast<ModType*>(mod) || mod->is_started())
                     {
-#ifdef __linux__
-                        if (!mod) UE4SS_DBG( "[UE4SS] Mod '%s' not found or not installed\n", std::string(mod_name.begin(), mod_name.end()).c_str());
-#endif
+                        if (!mod)
+                        {
+                            Output::send<LogLevel::Warning>(STR("Mod '{}' not found or not installed, skipping.\n"), mod_name);
+                        }
                         continue;
                     }
 
                     if (!mod_enabled.empty() && mod_enabled[0] == STR('1'))
                     {
+                        Output::send(STR("Starting {} mod '{}'\n"), std::is_same_v<ModType, LuaMod> ? STR("Lua") : STR("C++"), mod->get_name().data());
 #ifdef __linux__
-                        UE4SS_DBG( "[UE4SS] Starting %s mod '%s'\n", std::is_same_v<ModType, LuaMod> ? "Lua" : "C++", std::string(mod->get_name().begin(), mod->get_name().end()).c_str());
                         bool ok = ue4ss_with_crash_recovery([&]() { mod->start_mod(); });
                         if (!ok)
                         {
-                            UE4SS_DBG( "[UE4SS] Mod '%s' crashed during startup, continuing to next mod.\n", std::string(mod->get_name().begin(), mod->get_name().end()).c_str());
+                            Output::send<LogLevel::Error>(STR("Mod '{}' crashed during startup, continuing to next mod.\n"), mod->get_name().data());
                         }
 #else
-                        Output::send(STR("Starting {} mod '{}'\n"), std::is_same_v<ModType, LuaMod> ? STR("Lua") : STR("C++"), mod->get_name().data());
                         mod->start_mod();
 #endif
                     }
@@ -2292,11 +2313,10 @@ namespace RC
 
                 Output::send(STR("Mod '{}' has enabled.txt, starting mod.\n"), mod->get_name().data());
 #ifdef __linux__
-                UE4SS_DBG( "[UE4SS] Mod '%s' has enabled.txt, starting mod.\n", std::string(mod->get_name().begin(), mod->get_name().end()).c_str());
                 bool ok = ue4ss_with_crash_recovery([&]() { mod->start_mod(); });
                 if (!ok)
                 {
-                    UE4SS_DBG( "[UE4SS] Mod '%s' crashed during startup (enabled.txt), continuing to next mod.\n", std::string(mod->get_name().begin(), mod->get_name().end()).c_str());
+                    Output::send<LogLevel::Error>(STR("Mod '{}' crashed during startup (enabled.txt), continuing to next mod.\n"), mod->get_name().data());
                 }
 #else
                 mod->start_mod();
