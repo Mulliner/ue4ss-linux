@@ -1431,24 +1431,62 @@ namespace RC
         UE4SS_DBG( "[UE4SS] UnrealInitializer::Initialize() done.\n");
 
 #ifdef __linux__
-        // On Linux, the engine tick hook is never installed (no function addresses),
-        // so the RegisterEngineTickPreCallback lambda in on_program_start() that loads
-        // Lua mods will never fire. Call them directly here.
-        UE4SS_DBG( "[UE4SS] Linux: loading Lua mods directly (no engine tick hook)...\n");
+        // On Linux, the engine tick hook is never installed by default (needs resolved
+        // function addresses), so the RegisterEngineTickPreCallback lambda in on_program_start()
+        // that loads Lua mods will never fire. Call the equivalent sequence directly here.
+        UE4SS_DBG( "[UE4SS] Linux: loading mods directly (no engine tick hook)...\n");
         TRY([&] {
+#ifdef HAS_INPUT
+            m_input_handler.init();
+            if (!settings_manager.General.InputSource.empty())
+            {
+                if (m_input_handler.set_input_source(to_string(settings_manager.General.InputSource)))
+                {
+                    UE4SS_DBG( "[UE4SS] Linux: input source set to: %s\n", m_input_handler.get_current_input_source().c_str());
+                }
+                else
+                {
+                    UE4SS_ERR( "[UE4SS] Linux: failed to set input source to: %s\n", to_string(settings_manager.General.InputSource).c_str());
+                }
+            }
+#endif
+            LuaMod::m_default_game_thread_method = settings_manager.General.DefaultExecuteInGameThreadMethod;
+
             UE4SS_DBG( "[UE4SS] Linux: calling install_lua_mods()...\n");
             install_lua_mods();
             UE4SS_DBG( "[UE4SS] Linux: install_lua_mods() done.\n");
-            // Skip LuaMod::on_program_start() — it calls UObjectArray::AddUObjectDeleteListener
-            // and registers UE hooks (LoadMap, InitGameState, BeginPlay, etc.) which all
-            // require resolved function addresses that we don't have on Linux.
-            UE4SS_DBG( "[UE4SS] Linux: skipping LuaMod::on_program_start() (requires UE hooks)\n");
-            // Skip fire_program_start_for_cpp_mods() — C++ mods' on_program_start() may also access UE functions
-            UE4SS_DBG( "[UE4SS] Linux: skipping fire_program_start_for_cpp_mods() (requires UE functions)\n");
+
+            // LuaMod::on_program_start() and fire_program_start_for_cpp_mods() require resolved
+            // UE function addresses (GUObjectArray, ProcessInternal, etc.) for hook registration
+            // and the UObjectArray delete listener. Only call them if address resolution succeeded
+            // (via dlsym on unstripped binaries or manual UE4SS_Addresses.ini overrides).
+            if (Unreal::GUObjectArray)
+            {
+                UE4SS_DBG( "[UE4SS] Linux: GUObjectArray resolved, calling LuaMod::on_program_start() and fire_program_start_for_cpp_mods()...\n");
+                TRY([&] { LuaMod::on_program_start(); });
+                TRY([&] { fire_program_start_for_cpp_mods(); });
+            }
+            else
+            {
+                UE4SS_DBG( "[UE4SS] Linux: GUObjectArray not resolved, skipping LuaMod::on_program_start() and fire_program_start_for_cpp_mods() (stripped binary, no addresses)\n");
+            }
+
             UE4SS_DBG( "[UE4SS] Linux: calling start_lua_mods()...\n");
             start_lua_mods();
             UE4SS_DBG( "[UE4SS] Linux: start_lua_mods() done.\n");
-            UE4SS_DBG( "[UE4SS] Linux: Lua mods loaded.\n");
+
+            ObjectDumper::init();
+            if (settings_manager.General.EnableHotReloadSystem)
+            {
+#ifdef HAS_INPUT
+                register_keydown_event(settings_manager.General.HotReloadKey, {Input::ModifierKey::CONTROL}, [&]() {
+                    TRY([&] {
+                        queue_reinstall_mods();
+                    });
+                });
+#endif
+            }
+            UE4SS_DBG( "[UE4SS] Linux: Mods loaded.\n");
         });
 #endif
 
