@@ -31,7 +31,7 @@ jobs:
   # Native Linux build with GUI enabled
   build-linux-native:
     name: Linux Native ${{ matrix.config }} (${{ matrix.compiler }})
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -112,7 +112,7 @@ jobs:
   # Windows cross-compile from Linux using xwin (requires UEPseudo)
   build-windows-cross:
     name: Windows Cross-Compile (xwin)
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     if: ${{ vars.ENABLE_WINDOWS_CROSS == 'true' }}
     steps:
       - name: Checkout repo
