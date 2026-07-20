@@ -85,8 +85,7 @@ namespace RC::Unreal::UnrealInitializer
         }
         return symbol;
 #else
-        (void)Name;
-        return nullptr;
+        return dlsym(RTLD_DEFAULT, to_string(Name).c_str());
 #endif
     }
 
