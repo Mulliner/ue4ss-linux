@@ -177,4 +177,3 @@ If this Linux port has been useful to you, consider supporting further developme
 
 [![Donate](https://img.shields.io/badge/Donate-Stripe-blueviolet?logo=stripe&logoColor=white)](https://buy.stripe.com/8x26oJ2yv1Z3gRE40T5EY00)
 
-**[💜 Donate via Stripe](https://buy.stripe.com/8x26oJ2yv1Z3gRE40T5EY00)**
