@@ -97,7 +97,25 @@ generate_build_configurations()
 setup_build_configuration()
 
 # Apply UE build defines globally to all dependency targets
-add_compile_definitions(UE_BUILD_SHIPPING=1 UE_GAME PLATFORM_LINUX OSTYPE=Linux UBT_COMPILED_PLATFORM=Linux)
+# Parse the build type triplet (e.g., Game__Debug__Linux64) to determine the correct UE_BUILD_* define
+if(CMAKE_BUILD_TYPE)
+    string(REPLACE "__" ";" _config_parts ${CMAKE_BUILD_TYPE})
+    list(GET _config_parts 1 _config_type)
+    if(_config_type STREQUAL "Debug")
+        set(_ue_build_define UE_BUILD_DEBUG=1)
+    elseif(_config_type STREQUAL "Dev")
+        set(_ue_build_define UE_BUILD_DEVELOPMENT=1)
+    elseif(_config_type STREQUAL "Shipping")
+        set(_ue_build_define UE_BUILD_SHIPPING=1)
+    elseif(_config_type STREQUAL "Test")
+        set(_ue_build_define UE_BUILD_TEST=1)
+    else()
+        set(_ue_build_define UE_BUILD_SHIPPING=1)
+    endif()
+else()
+    set(_ue_build_define UE_BUILD_SHIPPING=1)
+endif()
+add_compile_definitions(${_ue_build_define} UE_GAME PLATFORM_LINUX OSTYPE=Linux UBT_COMPILED_PLATFORM=Linux)
 
 # Add subdirectories for dependencies and projects
 add_subdirectory("deps")
