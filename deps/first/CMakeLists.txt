@@ -10,6 +10,10 @@ add_subdirectory("Helpers")
 add_subdirectory("IniParser")
 add_subdirectory("Input")
 add_subdirectory("JSON")
+# Compile Lua as C++ so that C++ exceptions can safely propagate through Lua C API frames.
+# Without this, any C++ exception thrown inside a Lua callback (e.g. from FName::ToString)
+# results in undefined behavior and typically a SIGSEGV crash on Linux.
+set(LUA_COMPILE_AS_CPP ON CACHE BOOL "Compile Lua as C++ instead of C" FORCE)
 add_subdirectory("LuaMadeSimple")
 add_subdirectory("LuaRaw")
 add_subdirectory("MProgram")

@@ -1,3 +1,12 @@
+// ===========================================================================
+// UE4SS Linux Native Port
+// Copyright (c) 2024-2026 rl-dev.de (https://rl-dev.de)
+// Based on RE-UE4SS by UE4SS-RE (https://github.com/UE4SS-RE/RE-UE4SS)
+// Linux port originally by calebm02 (https://github.com/calebm02/RE-UE4SS-Linux)
+//
+// Licensed under the MIT License. See LICENSE and NOTICE for details.
+// ===========================================================================
+
 #include <Helpers/Casting.hpp>
 #include <LuaType/LuaAActor.hpp>
 #include <LuaType/LuaCustomProperty.hpp>
@@ -87,7 +96,12 @@ namespace RC::LuaType
 
         Unreal::UFunction* func{};
         Unreal::UObject* calling_context{};
-        bool is_first_userdata_function = lua_object.get_remote_cpp_object()->IsA<Unreal::UFunction>();
+        auto* remote_obj = lua_object.get_remote_cpp_object();
+        if (!remote_obj)
+        {
+            lua.throw_error("[UFunction:__call] Underlying UObject pointer is null");
+        }
+        bool is_first_userdata_function = remote_obj->IsA<Unreal::UFunction>();
 
         if (is_first_userdata_function)
         {
@@ -375,13 +389,23 @@ namespace RC::LuaType
     auto construct_fname(const LuaMadeSimple::Lua& lua) -> void
     {
         const auto& lua_object = lua.get_userdata<UObject>();
-        LuaType::FName::construct(lua, lua_object.get_remote_cpp_object()->GetNamePrivate());
+        auto* remote = lua_object.get_remote_cpp_object();
+        if (!remote)
+        {
+            lua.throw_error("[UObject:GetFName] Underlying UObject pointer is null");
+        }
+        LuaType::FName::construct(lua, remote->GetNamePrivate());
     }
 
     auto construct_uclass(const LuaMadeSimple::Lua& lua) -> void
     {
         const auto& lua_object = lua.get_userdata<UObject>();
-        LuaType::UClass::construct(lua, lua_object.get_remote_cpp_object()->GetClassPrivate());
+        auto* remote = lua_object.get_remote_cpp_object();
+        if (!remote)
+        {
+            lua.throw_error("[UObject:GetClass] Underlying UObject pointer is null");
+        }
+        LuaType::UClass::construct(lua, remote->GetClassPrivate());
     }
 
     auto construct_xproperty(const LuaMadeSimple::Lua& lua, Unreal::FProperty* property) -> void

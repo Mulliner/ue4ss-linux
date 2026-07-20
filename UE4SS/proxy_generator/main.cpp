@@ -1,6 +1,8 @@
 #include <Constructs/Views/EnumerateView.hpp>
 #include <File/File.hpp>
 
+#include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <format>
 #include <fstream>
@@ -10,6 +12,7 @@
 #include <string>
 #include <vector>
 
+#ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <Windows.h>
@@ -17,6 +20,171 @@
 #include <tchar.h>
 #include <Helpers/String.hpp>
 #include <Helpers/SysError.hpp>
+#else
+#include <Helpers/String.hpp>
+
+// Minimal PE structure definitions for cross-platform PE parsing
+#pragma pack(push, 1)
+struct IMAGE_DOS_HEADER {
+    uint16_t e_magic;
+    uint16_t e_cblp;
+    uint16_t e_cp;
+    uint16_t e_crlc;
+    uint16_t e_cparhdr;
+    uint16_t e_minalloc;
+    uint16_t e_maxalloc;
+    uint16_t e_ss;
+    uint16_t e_sp;
+    uint16_t e_csum;
+    uint16_t e_ip;
+    uint16_t e_cs;
+    uint16_t e_lfarlc;
+    uint16_t e_ovno;
+    uint16_t e_res[4];
+    uint16_t e_oemid;
+    uint16_t e_oeminfo;
+    uint16_t e_res2[10];
+    int32_t  e_lfanew;
+};
+
+struct IMAGE_FILE_HEADER {
+    uint16_t Machine;
+    uint16_t NumberOfSections;
+    uint32_t TimeDateStamp;
+    uint32_t PointerToSymbolTable;
+    uint32_t NumberOfSymbols;
+    uint16_t SizeOfOptionalHeader;
+    uint16_t Characteristics;
+};
+
+struct IMAGE_DATA_DIRECTORY {
+    uint32_t VirtualAddress;
+    uint32_t Size;
+};
+
+struct IMAGE_OPTIONAL_HEADER32 {
+    uint16_t Magic;
+    uint8_t  MajorLinkerVersion;
+    uint8_t  MinorLinkerVersion;
+    uint32_t SizeOfCode;
+    uint32_t SizeOfInitializedData;
+    uint32_t SizeOfUninitializedData;
+    uint32_t AddressOfEntryPoint;
+    uint32_t BaseOfCode;
+    uint32_t BaseOfData;
+    uint32_t ImageBase;
+    uint32_t SectionAlignment;
+    uint32_t FileAlignment;
+    uint16_t MajorOperatingSystemVersion;
+    uint16_t MinorOperatingSystemVersion;
+    uint16_t MajorImageVersion;
+    uint16_t MinorImageVersion;
+    uint16_t MajorSubsystemVersion;
+    uint16_t MinorSubsystemVersion;
+    uint32_t Win32VersionValue;
+    uint32_t SizeOfImage;
+    uint32_t SizeOfHeaders;
+    uint32_t CheckSum;
+    uint16_t Subsystem;
+    uint16_t DllCharacteristics;
+    uint32_t SizeOfStackReserve;
+    uint32_t SizeOfStackCommit;
+    uint32_t SizeOfHeapReserve;
+    uint32_t SizeOfHeapCommit;
+    uint32_t LoaderFlags;
+    uint32_t NumberOfRvaAndSizes;
+    IMAGE_DATA_DIRECTORY DataDirectory[16];
+};
+
+struct IMAGE_OPTIONAL_HEADER64 {
+    uint16_t Magic;
+    uint8_t  MajorLinkerVersion;
+    uint8_t  MinorLinkerVersion;
+    uint32_t SizeOfCode;
+    uint32_t SizeOfInitializedData;
+    uint32_t SizeOfUninitializedData;
+    uint32_t AddressOfEntryPoint;
+    uint32_t BaseOfCode;
+    uint32_t ImageBase;
+    uint32_t SectionAlignment;
+    uint32_t FileAlignment;
+    uint16_t MajorOperatingSystemVersion;
+    uint16_t MinorOperatingSystemVersion;
+    uint16_t MajorImageVersion;
+    uint16_t MinorImageVersion;
+    uint16_t MajorSubsystemVersion;
+    uint16_t MinorSubsystemVersion;
+    uint32_t Win32VersionValue;
+    uint32_t SizeOfImage;
+    uint32_t SizeOfHeaders;
+    uint32_t CheckSum;
+    uint16_t Subsystem;
+    uint16_t DllCharacteristics;
+    uint64_t SizeOfStackReserve;
+    uint64_t SizeOfStackCommit;
+    uint64_t SizeOfHeapReserve;
+    uint64_t SizeOfHeapCommit;
+    uint32_t LoaderFlags;
+    uint32_t NumberOfRvaAndSizes;
+    IMAGE_DATA_DIRECTORY DataDirectory[16];
+};
+
+struct IMAGE_NT_HEADERS32 {
+    uint32_t Signature;
+    IMAGE_FILE_HEADER FileHeader;
+    IMAGE_OPTIONAL_HEADER32 OptionalHeader;
+};
+
+struct IMAGE_NT_HEADERS64 {
+    uint32_t Signature;
+    IMAGE_FILE_HEADER FileHeader;
+    IMAGE_OPTIONAL_HEADER64 OptionalHeader;
+};
+
+struct IMAGE_SECTION_HEADER {
+    uint8_t  Name[8];
+    uint32_t VirtualSize;
+    uint32_t VirtualAddress;
+    uint32_t SizeOfRawData;
+    uint32_t PointerToRawData;
+    uint32_t PointerToRelocations;
+    uint32_t PointerToLinenumbers;
+    uint16_t NumberOfRelocations;
+    uint16_t NumberOfLinenumbers;
+    uint32_t Characteristics;
+};
+
+struct IMAGE_EXPORT_DIRECTORY {
+    uint32_t Characteristics;
+    uint32_t TimeDateStamp;
+    uint16_t MajorVersion;
+    uint16_t MinorVersion;
+    uint32_t Name;
+    uint32_t Base;
+    uint32_t NumberOfFunctions;
+    uint32_t NumberOfNames;
+    uint32_t AddressOfFunctions;
+    uint32_t AddressOfNames;
+    uint32_t AddressOfNameOrdinals;
+};
+#pragma pack(pop)
+
+static constexpr uint32_t IMAGE_DIRECTORY_ENTRY_EXPORT = 0;
+static constexpr uint16_t IMAGE_NT_OPTIONAL_HDR32_MAGIC = 0x10b;
+static constexpr uint16_t IMAGE_NT_OPTIONAL_HDR64_MAGIC = 0x20b;
+
+static auto rva_to_offset(const uint8_t* data, uint32_t rva, const IMAGE_SECTION_HEADER* sections, uint16_t num_sections) -> size_t
+{
+    for (uint16_t i = 0; i < num_sections; i++)
+    {
+        if (rva >= sections[i].VirtualAddress && rva < sections[i].VirtualAddress + sections[i].VirtualSize)
+        {
+            return sections[i].PointerToRawData + (rva - sections[i].VirtualAddress);
+        }
+    }
+    return rva;
+}
+#endif
 
 using namespace RC;
 namespace fs = std::filesystem;
@@ -44,10 +212,19 @@ std::vector<ExportFunction> DumpExports(const fs::path& dll_path)
 {
     auto dll_file = File::open(dll_path);
     const auto dll_file_map = dll_file.memory_map();
+    const auto* data = dll_file_map.data();
+    const auto size = dll_file_map.size();
 
+    if (size < sizeof(IMAGE_DOS_HEADER))
+    {
+        cerr << "File too small to be a valid PE/DLL file\n";
+        return {};
+    }
+
+#ifdef _WIN32
     ULONG export_directory_size = 0;
     IMAGE_EXPORT_DIRECTORY* export_directory =
-            (IMAGE_EXPORT_DIRECTORY*)ImageDirectoryEntryToData(dll_file_map.data(), FALSE, IMAGE_DIRECTORY_ENTRY_EXPORT, &export_directory_size);
+            (IMAGE_EXPORT_DIRECTORY*)ImageDirectoryEntryToData(data, FALSE, IMAGE_DIRECTORY_ENTRY_EXPORT, &export_directory_size);
 
     if (export_directory == nullptr)
     {
@@ -56,19 +233,19 @@ std::vector<ExportFunction> DumpExports(const fs::path& dll_path)
         return {};
     }
 
-    IMAGE_DOS_HEADER* dos_header = (IMAGE_DOS_HEADER*)dll_file_map.data();
-    IMAGE_NT_HEADERS* nt_header = (IMAGE_NT_HEADERS*)(dll_file_map.data() + dos_header->e_lfanew);
+    IMAGE_DOS_HEADER* dos_header = (IMAGE_DOS_HEADER*)data;
+    IMAGE_NT_HEADERS* nt_header = (IMAGE_NT_HEADERS*)(data + dos_header->e_lfanew);
 
-    DWORD* name_rvas = (DWORD*)ImageRvaToVa(nt_header, dll_file_map.data(), export_directory->AddressOfNames, NULL);
-    DWORD* function_rvas = (DWORD*)ImageRvaToVa(nt_header, dll_file_map.data(), export_directory->AddressOfFunctions, NULL);
-    uint16_t* ordinals = (uint16_t*)ImageRvaToVa(nt_header, dll_file_map.data(), export_directory->AddressOfNameOrdinals, NULL);
+    DWORD* name_rvas = (DWORD*)ImageRvaToVa(nt_header, data, export_directory->AddressOfNames, NULL);
+    DWORD* function_rvas = (DWORD*)ImageRvaToVa(nt_header, data, export_directory->AddressOfFunctions, NULL);
+    uint16_t* ordinals = (uint16_t*)ImageRvaToVa(nt_header, data, export_directory->AddressOfNameOrdinals, NULL);
 
     std::vector<ExportFunction> exports;
     std::set<uint16_t> exported_ordinals;
 
     for (size_t i = 0; i < export_directory->NumberOfNames; i++)
     {
-        std::string export_name = (char*)ImageRvaToVa(nt_header, dll_file_map.data(), name_rvas[i], NULL);
+        std::string export_name = (char*)ImageRvaToVa(nt_header, data, name_rvas[i], NULL);
         uint16_t ordinal = ordinals[i] + 1;
 
         ExportFunction named_export(ordinal, true, export_name);
@@ -83,13 +260,91 @@ std::vector<ExportFunction> DumpExports(const fs::path& dll_path)
         uint32_t function_rva = function_rvas[i];
 
         if (function_rva == 0) continue;
-        if (exported_ordinals.contains(ordinal)) continue; // a named function for this ordinal was already exported
+        if (exported_ordinals.contains(ordinal)) continue;
 
         ExportFunction ordinal_export(ordinal, false, std::format("ordinal{}", ordinal));
         exports.push_back(ordinal_export);
     }
 
     return exports;
+#else
+    auto* dos_header = (IMAGE_DOS_HEADER*)data;
+    if (dos_header->e_magic != 0x5A4D) // "MZ"
+    {
+        cerr << "Invalid PE file: missing MZ signature\n";
+        return {};
+    }
+
+    auto* nt_headers = (IMAGE_NT_HEADERS32*)(data + dos_header->e_lfanew);
+    if (nt_headers->Signature != 0x00004550) // "PE\0\0"
+    {
+        cerr << "Invalid PE file: missing PE signature\n";
+        return {};
+    }
+
+    // Determine PE32 vs PE32+ and get export directory RVA
+    uint32_t export_dir_rva;
+    const IMAGE_SECTION_HEADER* sections;
+    uint16_t num_sections = nt_headers->FileHeader.NumberOfSections;
+
+    if (nt_headers->OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC)
+    {
+        auto* nt64 = (IMAGE_NT_HEADERS64*)(data + dos_header->e_lfanew);
+        export_dir_rva = nt64->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress;
+        sections = (IMAGE_SECTION_HEADER*)((uint8_t*)nt64 + sizeof(IMAGE_NT_HEADERS64));
+    }
+    else
+    {
+        export_dir_rva = nt_headers->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress;
+        sections = (IMAGE_SECTION_HEADER*)((uint8_t*)nt_headers + sizeof(IMAGE_NT_HEADERS32));
+    }
+
+    if (export_dir_rva == 0)
+    {
+        cerr << "PE file has no export directory\n";
+        return {};
+    }
+
+    size_t export_offset = rva_to_offset(data, export_dir_rva, sections, num_sections);
+    auto* export_directory = (IMAGE_EXPORT_DIRECTORY*)(data + export_offset);
+
+    size_t names_offset = rva_to_offset(data, export_directory->AddressOfNames, sections, num_sections);
+    size_t functions_offset = rva_to_offset(data, export_directory->AddressOfFunctions, sections, num_sections);
+    size_t ordinals_offset = rva_to_offset(data, export_directory->AddressOfNameOrdinals, sections, num_sections);
+
+    auto* name_rvas = (uint32_t*)(data + names_offset);
+    auto* function_rvas = (uint32_t*)(data + functions_offset);
+    auto* ordinals = (uint16_t*)(data + ordinals_offset);
+
+    std::vector<ExportFunction> exports;
+    std::set<uint16_t> exported_ordinals;
+
+    for (size_t i = 0; i < export_directory->NumberOfNames; i++)
+    {
+        size_t name_offset = rva_to_offset(data, name_rvas[i], sections, num_sections);
+        std::string export_name = (char*)(data + name_offset);
+        uint16_t ordinal = ordinals[i] + 1;
+
+        ExportFunction named_export(ordinal, true, export_name);
+        exports.push_back(named_export);
+
+        exported_ordinals.insert(ordinal);
+    }
+
+    for (size_t i = 0; i < export_directory->NumberOfFunctions; i++)
+    {
+        uint16_t ordinal = (uint16_t)(export_directory->Base + i);
+        uint32_t function_rva = function_rvas[i];
+
+        if (function_rva == 0) continue;
+        if (exported_ordinals.contains(ordinal)) continue;
+
+        ExportFunction ordinal_export(ordinal, false, std::format("ordinal{}", ordinal));
+        exports.push_back(ordinal_export);
+    }
+
+    return exports;
+#endif
 }
 
 std::vector<ExportFunction> ReadExportsFile(const fs::path& exp_path, fs::path& dll_path_out)
@@ -130,7 +385,11 @@ std::vector<ExportFunction> ReadExportsFile(const fs::path& exp_path, fs::path& 
     return exports;
 }
 
+#ifdef _WIN32
 int _tmain(int argc, TCHAR* argv[])
+#else
+int main(int argc, char* argv[])
+#endif
 {
     if (argc != 3)
     {

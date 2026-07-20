@@ -1,8 +1,10 @@
 #include <chrono>
+#include <ctime>
+#include <cstring>
+#include <iomanip>
+#include <sstream>
 
 #include <Helpers/Time.hpp>
-#include <fmt/xchar.h>
-#include <fmt/chrono.h>
 
 #if _WIN32
 #define NOMINMAX
@@ -12,42 +14,32 @@
 #endif
 #endif
 
-#if RC_IS_ANSI == 1
-#define RC_STD_MAKE_FORMAT_ARGS fmt::make_format_args
-#else
-#define RC_STD_MAKE_FORMAT_ARGS fmt::make_format_args<fmt::buffered_context<CharType>>
-#endif
-
 namespace RC
 {
     auto get_now_as_string(StringViewType format) -> StringType
     {
-        bool use_local_time = true;
-#ifdef _WIN32
-        if (auto module = GetModuleHandleW(L"ntdll.dll"); module && GetProcAddress(module, "wine_get_version"))
-        {
-            use_local_time = false;
-        }
-#endif
+        auto now = std::chrono::system_clock::now();
+        auto now_c = std::chrono::system_clock::to_time_t(now);
+        std::tm tm_buf{};
+        localtime_r(&now_c, &tm_buf);
 
-        if (use_local_time)
-        {
-            try
-            {
-                static const auto timezone = std::chrono::current_zone();
-                const auto now = std::chrono::time_point_cast<std::chrono::system_clock::duration>(timezone->to_local(std::chrono::system_clock::now()));
-                return fmt::vformat(fmt::detail::to_string_view(format), RC_STD_MAKE_FORMAT_ARGS(now));
-            }
-            catch (std::runtime_error&)
-            {
-                const auto now = std::chrono::system_clock::now();
-                return fmt::vformat(fmt::detail::to_string_view(format), RC_STD_MAKE_FORMAT_ARGS(now));
-            }
+        // Convert UE4SS-style format ({:%Y-%m-%d %H:%M:%S}) to strftime format
+        std::string fmt_str(format.begin(), format.end());
+        // Strip {:% and trailing } to get strftime format
+        size_t colon = fmt_str.find(":%");
+        if (colon != std::string::npos) {
+            fmt_str = fmt_str.substr(colon + 2);
+            if (!fmt_str.empty() && fmt_str.back() == '}') fmt_str.pop_back();
         }
-        else
-        {
-            const auto now = std::chrono::system_clock::now();
-            return fmt::vformat(fmt::detail::to_string_view(format), RC_STD_MAKE_FORMAT_ARGS(now));
-        }
+
+        char buf[256];
+        std::strftime(buf, sizeof(buf), fmt_str.c_str(), &tm_buf);
+
+#ifdef _WIN32
+        std::wstring wbuf(buf, buf + strlen(buf));
+        return wbuf;
+#else
+        return std::u16string(buf, buf + strlen(buf));
+#endif
     }
 } // namespace RC

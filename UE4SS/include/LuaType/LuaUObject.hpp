@@ -1,3 +1,12 @@
+// ===========================================================================
+// UE4SS Linux Native Port
+// Copyright (c) 2024-2026 rl-dev.de (https://rl-dev.de)
+// Based on RE-UE4SS by UE4SS-RE (https://github.com/UE4SS-RE/RE-UE4SS)
+// Linux port originally by calebm02 (https://github.com/calebm02/RE-UE4SS-Linux)
+//
+// Licensed under the MIT License. See LICENSE and NOTICE for details.
+// ===========================================================================
+
 #pragma once
 
 #define NOMINMAX
@@ -558,16 +567,25 @@ namespace RC::LuaType
 
             table.add_pair("GetOuter", [](const LuaMadeSimple::Lua& lua) -> int {
                 const auto& lua_object = lua.get_userdata<SelfType>();
-
-                UObject::construct(lua, lua_object.get_remote_cpp_object()->GetOuterPrivate());
+                auto* remote = lua_object.get_remote_cpp_object();
+                if (!remote)
+                {
+                    lua.throw_error("[UObject:GetOuter] Underlying UObject pointer is null");
+                }
+                UObject::construct(lua, remote->GetOuterPrivate());
 
                 return 1;
             });
 
             table.add_pair("IsAnyClass", [](const LuaMadeSimple::Lua& lua) -> int {
                 const auto& lua_object = lua.get_userdata<SelfType>();
-
-                lua.set_bool(lua_object.get_remote_cpp_object()->template IsA<Unreal::UClass>());
+                auto* remote = lua_object.get_remote_cpp_object();
+                if (!remote)
+                {
+                    lua.set_bool(false);
+                    return 1;
+                }
+                lua.set_bool(remote->template IsA<Unreal::UClass>());
 
                 return 1;
             });
@@ -630,13 +648,25 @@ namespace RC::LuaType
                 //       We could use strings or FNames, those could be calculated on the Lua side and then
                 //       we wouldn't need to preemptively expose anything
                 const auto& lua_object = lua.get_userdata<SelfType>();
-                lua.set_bool(lua_object.get_remote_cpp_object()->template IsA<Unreal::UClass>());
+                auto* remote = lua_object.get_remote_cpp_object();
+                if (!remote)
+                {
+                    lua.set_bool(false);
+                    return 1;
+                }
+                lua.set_bool(remote->template IsA<Unreal::UClass>());
                 return 1;
             });
 
             table.add_pair("GetWorld", [](const LuaMadeSimple::Lua& lua) -> int {
                 const auto& lua_object = lua.get_userdata<SelfType>();
-                auto_construct_object(lua, lua_object.get_remote_cpp_object()->GetWorld());
+                auto* remote = lua_object.get_remote_cpp_object();
+                if (!remote)
+                {
+                    auto_construct_object(lua, nullptr);
+                    return 1;
+                }
+                auto_construct_object(lua, remote->GetWorld());
                 return 1;
             });
 
@@ -746,9 +776,14 @@ Overloads:
                 }
                 auto executor = lua.get_userdata<LuaType::UObject>();
 
+                auto* remote = lua_object.get_remote_cpp_object();
+                if (!remote)
+                {
+                    lua.throw_error("[UObject:ProcessConsoleExec] Underlying UObject pointer is null");
+                }
                 auto ar = Unreal::FOutputDevice{};
                 auto return_value =
-                        lua_object.get_remote_cpp_object()->ProcessConsoleExec(FromCharTypePtr<Unreal::TCHAR>(cmd.c_str()), ar, executor.get_remote_cpp_object());
+                        remote->ProcessConsoleExec(FromCharTypePtr<Unreal::TCHAR>(cmd.c_str()), ar, executor.get_remote_cpp_object());
 
                 lua.set_bool(return_value);
                 return 1;

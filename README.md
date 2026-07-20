@@ -1,5 +1,12 @@
 # UE4SS Linux Native Port
 
+> **Copyright (c) 2024-2026 [rl-dev.de](https://rl-dev.de)**
+>
+> Based on [RE-UE4SS](https://github.com/UE4SS-RE/RE-UE4SS) by [UE4SS-RE](https://github.com/UE4SS-RE).
+> Linux port originally by [calebm02](https://github.com/calebm02/RE-UE4SS-Linux).
+>
+> Licensed under the MIT License. See [LICENSE](LICENSE) and [NOTICE](NOTICE) for details.
+
 A native Linux build of UE4SS (Unreal Engine 4/5 Scripting System) for dedicated game servers running on Linux. This port enables Lua mod loading and scripting on Linux dedicated servers without requiring Windows.
 
 > ## ⚠️ IMPORTANT: Plugin File Format on Linux

@@ -1,4 +1,16 @@
+// ===========================================================================
+// UE4SS Linux Native Port
+// Copyright (c) 2024-2026 rl-dev.de (https://rl-dev.de)
+// Based on RE-UE4SS by UE4SS-RE (https://github.com/UE4SS-RE/RE-UE4SS)
+// Linux port originally by calebm02 (https://github.com/calebm02/RE-UE4SS-Linux)
+//
+// Licensed under the MIT License. See LICENSE and NOTICE for details.
+// ===========================================================================
+
 #include <Unreal/NameTypes.hpp>
+
+#include <fmt/core.h>
+#include <fmt/xchar.h>
 
 #include <Unreal/Core/Containers/FString.hpp>
 #include <Unreal/Core/Containers/FUtf8String.hpp>
@@ -110,7 +122,14 @@ namespace RC::Unreal
         }
         else
         {
+#ifdef __linux__
+            // Linux limited mode: FName::ToString is not available (stripped binary, dlsym failed).
+            // Return a placeholder with the comparison index so callers get something identifiable
+            // instead of crashing with an unhandled C++ exception through Lua C frames.
+            return fmt::format(STR("FName_0x{:X}"), static_cast<uint32>(name->GetComparisonIndex().ToUnstableInt()));
+#else
             throw std::runtime_error{"FName::ToString was not ready but was called anyway"};
+#endif
         }
     }
 

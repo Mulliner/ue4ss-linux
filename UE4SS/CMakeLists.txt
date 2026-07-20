@@ -154,7 +154,6 @@ target_link_libraries(UE4SS PUBLIC
     Function IniParser JSON
     Input Constructs Helpers
     MProgram ScopedTimer Profiler
-    patternsleuth_bind
 )
 
 # Link third-party dependencies - platform specific

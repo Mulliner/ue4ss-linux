@@ -46,6 +46,10 @@ message("IPO/LTO support: ${IPO_SUPPORTED}; ${IPO_ERROR}")
 ue4ss_initialize_project()
 
 # Projects list is now in ProjectConfig.cmake
+# Filter out UVTD on non-Windows (depends on raw_pdb which is Windows-only)
+if(NOT WIN32)
+    list(REMOVE_ITEM UE4SS_PROJECTS UVTD)
+endif()
 set(PROJECTS ${UE4SS_PROJECTS})
 
 # Fix for ninja/clang
@@ -91,6 +95,9 @@ generate_build_configurations()
 # Set default configuration
 # Uses setup_build_configuration() from cmake/modules/Utilities.cmake
 setup_build_configuration()
+
+# Apply UE build defines globally to all dependency targets
+add_compile_definitions(UE_BUILD_SHIPPING=1 UE_GAME PLATFORM_LINUX OSTYPE=Linux UBT_COMPILED_PLATFORM=Linux)
 
 # Add subdirectories for dependencies and projects
 add_subdirectory("deps")

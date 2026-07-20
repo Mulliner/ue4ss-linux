@@ -82,16 +82,17 @@ if(WIN32)
     add_subdirectory("raw_pdb")
 endif()
 
-# Corrosion (Rust integration)
-FetchContent_Declare(
-    Corrosion
-    GIT_REPOSITORY https://github.com/UE4SS-RE/corrosion.git
-    #TODO: Go back to main repo once this issue is fixed.
-    GIT_TAG 52844733e14f095c947577627e367ee5f6458af7
-    GIT_SHALLOW TRUE
-    GIT_PROGRESS ON
-)
-add_subdirectory("corrosion")
+# Corrosion (Rust integration) - disabled because Rust is not installed
+# PalSentinel doesn't need patternsleuth/signature scanning
+# FetchContent_Declare(
+#     Corrosion
+#     GIT_REPOSITORY https://github.com/UE4SS-RE/corrosion.git
+#     #TODO: Go back to main repo once this issue is fixed.
+#     GIT_TAG 52844733e14f095c947577627e367ee5f6458af7
+#     GIT_SHALLOW TRUE
+#     GIT_PROGRESS ON
+# )
+# add_subdirectory("corrosion")
 
 # fmt
 FetchContent_Declare(

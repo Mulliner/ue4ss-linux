@@ -1,3 +1,12 @@
+// ===========================================================================
+// UE4SS Linux Native Port
+// Copyright (c) 2024-2026 rl-dev.de (https://rl-dev.de)
+// Based on RE-UE4SS by UE4SS-RE (https://github.com/UE4SS-RE/RE-UE4SS)
+// Linux port originally by calebm02 (https://github.com/calebm02/RE-UE4SS-Linux)
+//
+// Licensed under the MIT License. See LICENSE and NOTICE for details.
+// ===========================================================================
+
 #ifdef _WIN32
 #define NOMINMAX
 #include <Windows.h>
@@ -446,6 +455,15 @@ namespace RC
                                              ? STR("")
                                              : (UE4SS_LIB_IS_BETA == 0 ? STR(" Beta #?") : fmt::format(STR(" Beta #{}"), UE4SS_LIB_VERSION_BETA))),
                          ensure_str(UE4SS_LIB_BUILD_GITSHA));
+
+            // Copyright banner in the UE4SS console
+            Output::send<LogLevel::Normal>(STR("========================================\n"));
+            Output::send<LogLevel::Normal>(STR(" Copyright (c) 2024-2026 rl-dev.de\n"));
+            Output::send<LogLevel::Normal>(STR(" https://rl-dev.de\n"));
+            Output::send<LogLevel::Normal>(STR(" Based on RE-UE4SS by UE4SS-RE\n"));
+            Output::send<LogLevel::Normal>(STR(" https://github.com/UE4SS-RE/RE-UE4SS\n"));
+            Output::send<LogLevel::Normal>(STR("========================================\n"));
+
             bool use_local_time = true;
 #ifdef _WIN32
             if (auto module = GetModuleHandleW(L"ntdll.dll"); module && GetProcAddress(module, "wine_get_version"))
