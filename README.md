@@ -129,9 +129,9 @@ On Linux, if no settings file is found, hardcoded defaults are used.
 ## Known Limitations
 
 - **Work in Progress**: The entire codebase is being ported from Windows to Linux. Since this is an ongoing process, bugs may still occur. Not all Windows-specific code paths have been fully tested — please [report issues](https://github.com/XarminaEu/ue4ss-linux/issues) if you encounter problems.
-- **Limited Mode**: UE function addresses are not resolved on stripped Linux binaries. Mod functionality is limited to Lua scripting and basic operations.
+- **Function Resolution**: UE function addresses are resolved automatically on unstripped binaries via `dlsym`. On stripped binaries, use `UE4SS_Addresses.ini` to provide addresses manually. Without resolved addresses, mod functionality is limited to Lua scripting and basic operations.
 - **No GUI**: GUI is disabled in the Linux build (headless mode only).
-- **No Blueprint Mod Loader**: Blueprint mod loading requires resolved UE functions not available on stripped Linux binaries. The BPModLoaderMod is included but will only work on unstripped binaries with hooks enabled.
+- **Blueprint Mod Loader**: Blueprint mod loading is supported. On unstripped binaries, UE function addresses are resolved automatically via `dlsym`. On stripped binaries, addresses can be provided manually via `UE4SS_Addresses.ini`. See [Blueprint Modloader docs](docs/feature-overview/blueprint-modloader.md) for details.
 - **C++ Mods**: C++ mods must be compiled as `.so` files (not `.dll`).
 - **Case Sensitivity**: Linux filesystems are case-sensitive — mod directories must use lowercase `scripts`.
 

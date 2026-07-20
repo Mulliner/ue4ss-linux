@@ -1031,6 +1031,151 @@ namespace RC
                     fprintf(stderr, "[UE4SS] dlsym: console_manager_singleton skipped (no scan on Linux)\n");
                 };
 
+                // Override ProcessInternal scan — needed for BP mod loading (BeginPlay hooks, function calls)
+                config.ScanOverrides.process_internal = [&](std::vector<SignatureContainer>&, Unreal::Signatures::ScanResult& scan_result) {
+                    void* addr = try_resolve("UObject::ProcessInternal");
+                    if (!addr) addr = try_resolve("_ZN6UObject15ProcessInternalER5FFrameRPv");
+                    if (!addr) addr = try_resolve("ProcessInternal");
+                    if (addr)
+                    {
+                        Unreal::UObject::ProcessInternalInternal.assign_address(addr);
+                        scan_result.SuccessMessage.emplace_back(STR("ProcessInternal found via dlsym"));
+                    }
+                    else
+                    {
+                        fprintf(stderr, "[UE4SS] dlsym: ProcessInternal not found (stripped binary?)\n");
+                    }
+                };
+
+                // Override ProcessLocalScriptFunction scan — needed for BP mod loading
+                config.ScanOverrides.process_local_script_function = [&](std::vector<SignatureContainer>&, Unreal::Signatures::ScanResult& scan_result) {
+                    void* addr = try_resolve("UObject::ProcessLocalScriptFunction");
+                    if (!addr) addr = try_resolve("_ZN6UObject26ProcessLocalScriptFunctionER5FFrameRPv");
+                    if (!addr) addr = try_resolve("ProcessLocalScriptFunction");
+                    if (addr)
+                    {
+                        Unreal::UObject::ProcessLocalScriptFunctionInternal.assign_address(addr);
+                        scan_result.SuccessMessage.emplace_back(STR("ProcessLocalScriptFunction found via dlsym"));
+                    }
+                    else
+                    {
+                        fprintf(stderr, "[UE4SS] dlsym: ProcessLocalScriptFunction not found (stripped binary?)\n");
+                    }
+                };
+
+                // Override CallFunctionByNameWithArguments scan — needed for console commands and BP mod loading
+                config.ScanOverrides.call_function_by_name_with_arguments = [&](std::vector<SignatureContainer>&, Unreal::Signatures::ScanResult& scan_result) {
+                    void* addr = try_resolve("UObject::CallFunctionByNameWithArguments");
+                    if (!addr) addr = try_resolve("_ZN6UObject27CallFunctionByNameWithArgumentsEPKTRK18FOutputDeviceP6UObjectb");
+                    if (!addr) addr = try_resolve("CallFunctionByNameWithArguments");
+                    if (addr)
+                    {
+                        Unreal::UObject::CallFunctionByNameWithArgumentsInternal.assign_address(addr);
+                        scan_result.SuccessMessage.emplace_back(STR("CallFunctionByNameWithArguments found via dlsym"));
+                    }
+                    else
+                    {
+                        fprintf(stderr, "[UE4SS] dlsym: CallFunctionByNameWithArguments not found (stripped binary?)\n");
+                    }
+                };
+
+                // static_find_object: On Linux, StaticFindObject uses slow iteration via GUObjectArray
+                // (no native StaticFindObjectFastInternal needed), so no override required.
+                // This override is a no-op.
+                config.ScanOverrides.static_find_object = [&](std::vector<SignatureContainer>&, Unreal::Signatures::ScanResult&) {
+                    // No-op — StaticFindObject_InternalSlow iterates GUObjectArray directly
+                };
+
+                // Load manual address overrides from UE4SS_Addresses.ini (for stripped binaries)
+                {
+                    auto addresses_file = m_working_directory / STR("UE4SS_Addresses.ini");
+                    if (std::filesystem::exists(addresses_file))
+                    {
+                        fprintf(stderr, "[UE4SS] Loading manual address overrides from UE4SS_Addresses.ini\n");
+                        try
+                        {
+                            auto file = File::open(ensure_str(addresses_file), File::OpenFor::Reading, File::OverwriteExistingFile::No, File::CreateIfNonExistent::No);
+                            Ini::Parser parser;
+                            parser.parse(file);
+
+                            auto try_get_address = [&](const File::CharType* section_name, const File::CharType* key_name) -> void* {
+                                try {
+                                    const auto& val = parser.get_string(section_name, key_name);
+                                    if (val.empty()) return nullptr;
+                                    // Convert File::StringType (u16string on Linux) to std::string for parsing
+                                    std::string addr_str;
+                                    for (auto ch : val) { addr_str.push_back(static_cast<char>(ch)); }
+                                    // Parse as hex address
+                                    if (addr_str.starts_with("0x") || addr_str.starts_with("0X")) {
+                                        addr_str = addr_str.substr(2);
+                                    }
+                                    uint64_t addr_val = std::stoull(addr_str, nullptr, 16);
+                                    if (addr_val == 0) return nullptr;
+                                    return std::bit_cast<void*>(addr_val);
+                                } catch (...) {
+                                    return nullptr;
+                                }
+                            };
+
+                            // Apply manual overrides (these take priority over dlsym results)
+                            if (void* addr = try_get_address(STR("Addresses"), STR("GUObjectArray")))
+                            {
+                                Unreal::UObjectArray::SetupGUObjectArrayAddress(addr);
+                                fprintf(stderr, "[UE4SS] Manual override: GUObjectArray = %p\n", addr);
+                            }
+                            if (void* addr = try_get_address(STR("Addresses"), STR("FNameToString")))
+                            {
+                                Unreal::FName::ToStringInternal.assign_address(addr);
+                                fprintf(stderr, "[UE4SS] Manual override: FNameToString = %p\n", addr);
+                            }
+                            if (void* addr = try_get_address(STR("Addresses"), STR("FNameConstructor")))
+                            {
+                                Unreal::FName::ConstructorInternal.assign_address(addr);
+                                fprintf(stderr, "[UE4SS] Manual override: FNameConstructor = %p\n", addr);
+                            }
+                            if (void* addr = try_get_address(STR("Addresses"), STR("StaticConstructObject")))
+                            {
+                                Unreal::UObjectGlobals::SetupStaticConstructObjectInternalAddress(addr);
+                                fprintf(stderr, "[UE4SS] Manual override: StaticConstructObject = %p\n", addr);
+                            }
+                            if (void* addr = try_get_address(STR("Addresses"), STR("GMalloc")))
+                            {
+                                Unreal::GMalloc = std::bit_cast<Unreal::FMalloc**>(addr);
+                                fprintf(stderr, "[UE4SS] Manual override: GMalloc = %p\n", addr);
+                            }
+                            if (void* addr = try_get_address(STR("Addresses"), STR("GNatives")))
+                            {
+                                Unreal::GNatives_Internal = reinterpret_cast<Unreal::FNativeFuncPtr*>(addr);
+                                fprintf(stderr, "[UE4SS] Manual override: GNatives = %p\n", addr);
+                            }
+                            if (void* addr = try_get_address(STR("Addresses"), STR("UGameEngineTick")))
+                            {
+                                Unreal::UEngine::TickInternal.assign_address(addr);
+                                fprintf(stderr, "[UE4SS] Manual override: UGameEngineTick = %p\n", addr);
+                            }
+                            if (void* addr = try_get_address(STR("Addresses"), STR("ProcessInternal")))
+                            {
+                                Unreal::UObject::ProcessInternalInternal.assign_address(addr);
+                                fprintf(stderr, "[UE4SS] Manual override: ProcessInternal = %p\n", addr);
+                            }
+                            if (void* addr = try_get_address(STR("Addresses"), STR("ProcessLocalScriptFunction")))
+                            {
+                                Unreal::UObject::ProcessLocalScriptFunctionInternal.assign_address(addr);
+                                fprintf(stderr, "[UE4SS] Manual override: ProcessLocalScriptFunction = %p\n", addr);
+                            }
+                            if (void* addr = try_get_address(STR("Addresses"), STR("CallFunctionByNameWithArguments")))
+                            {
+                                Unreal::UObject::CallFunctionByNameWithArgumentsInternal.assign_address(addr);
+                                fprintf(stderr, "[UE4SS] Manual override: CallFunctionByNameWithArguments = %p\n", addr);
+                            }
+                        }
+                        catch (const std::exception& e)
+                        {
+                            fprintf(stderr, "[UE4SS] Error parsing UE4SS_Addresses.ini: %s\n", e.what());
+                        }
+                    }
+                }
+
                 dlclose(main_exe);
             }
 

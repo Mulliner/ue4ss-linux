@@ -756,16 +756,19 @@ namespace RC::Unreal::UnrealInitializer
         }
 
 #ifdef __linux__
-        // On Linux with a stripped binary, we cannot resolve UE function addresses.
-        // Skip all post-scan initialization (VerifyFNameConstructor, UObjectArray waits,
-        // StaticFindObject, hook installation) since they all require resolved addresses.
-        // Mods will be loaded directly from UE4SSProgram::init() instead of via engine tick hook.
-        fprintf(stderr, "[UE4SS] Initialize: skipping post-scan init on Linux (no function addresses)\n");
-        StaticStorage::bIsInitialized = true;
-        Output::send(STR("Using engine version: {}.{}\n"), Version::Major, Version::Minor);
-        Output::send<LogLevel::Warning>(STR("Linux limited mode: UE function addresses not resolved (stripped binary). Mod functionality will be limited.\n"));
-        return;
-#else
+        // On Linux, check if GUObjectArray was found (via dlsym or manual override).
+        // If it was, we can proceed with post-scan init (object finding, hooks, etc.).
+        // If not, skip everything since all post-scan init requires GUObjectArray.
+        if (!Unreal::GUObjectArray)
+        {
+            fprintf(stderr, "[UE4SS] Initialize: GUObjectArray not found, skipping post-scan init (stripped binary)\n");
+            StaticStorage::bIsInitialized = true;
+            Output::send(STR("Using engine version: {}.{}\n"), Version::Major, Version::Minor);
+            Output::send<LogLevel::Warning>(STR("Linux limited mode: UE function addresses not resolved (stripped binary). Mod functionality will be limited.\n"));
+            return;
+        }
+        fprintf(stderr, "[UE4SS] Initialize: GUObjectArray found, proceeding with full post-scan init\n");
+#endif
         if (!StaticStorage::FNameVerificationStatus.load(std::memory_order_acquire))
         {
             VerifyFNameConstructor();
@@ -1150,7 +1153,6 @@ namespace RC::Unreal::UnrealInitializer
         }
 
         Output::send<LogLevel::Verbose>(STR("UnrealConfig.FExecVTableOffsetInLocalPlayer: {:X}\n"), UnrealConfig.FExecVTableOffsetInLocalPlayer);
-#endif // #else (non-Linux post-scan init)
 
         PostInitialize(UnrealConfig);
     }
