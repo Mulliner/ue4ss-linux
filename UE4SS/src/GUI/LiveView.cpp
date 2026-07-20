@@ -1557,7 +1557,7 @@ namespace RC::GUI
         if (ImGui::IsItemHovered())
         {
             ImGui::BeginTooltip();
-            ImGui::Text("%S", property->GetFullName().c_str());
+            ImGui::Text("%s", to_string(property->GetFullName()).c_str());
             ImGui::Separator();
             ImGui::Text("Offset: 0x%X", property->GetOffset_Internal());
             ImGui::Text("Size: 0x%X", property->GetSize());
@@ -1642,7 +1642,7 @@ namespace RC::GUI
             ++index;
 
             ImGui::TableNextColumn();
-            ImGui::Text("%S", enum_name.c_str());
+            ImGui::Text("%s", to_string(enum_name).c_str());
             if (ImGui::BeginPopupContextItem(to_string(fmt::format(STR("context-menu-{}"), enum_name)).c_str()))
             {
                 if (ImGui::MenuItem("Copy name"))
@@ -1658,7 +1658,7 @@ namespace RC::GUI
             }
 
             ImGui::TableNextColumn();
-            ImGui::Text("%S", enum_friendly_name.c_str());
+            ImGui::Text("%s", to_string(enum_friendly_name).c_str());
 
             ImGui::TableNextColumn();
             ImGui::Text("%lld", name.Value);

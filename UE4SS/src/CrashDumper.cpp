@@ -118,18 +118,21 @@ namespace RC
         if (fd >= 0)
         {
             const char* header = "=== UE4SS Crash Report ===\n";
-            (void)write(fd, header, strlen(header));
+            ssize_t wr = write(fd, header, strlen(header));
+            (void)wr;
 
             const char* sig_name = sig == SIGSEGV ? "SIGSEGV" : sig == SIGABRT ? "SIGABRT" : sig == SIGFPE ? "SIGFPE" : sig == SIGILL ? "SIGILL" : "UNKNOWN";
             char sig_buf[256];
             int sig_len = snprintf(sig_buf, sizeof(sig_buf), "Signal: %d (%s)\n\n", sig, sig_name);
-            (void)write(fd, sig_buf, sig_len);
+            wr = write(fd, sig_buf, sig_len);
+            (void)wr;
 
             // Backtrace
             void* bt_buffer[64];
             int bt_size = backtrace(bt_buffer, 64);
             const char* bt_header = "\nBacktrace:\n";
-            (void)write(fd, bt_header, strlen(bt_header));
+            wr = write(fd, bt_header, strlen(bt_header));
+            (void)wr;
             backtrace_symbols_fd(bt_buffer, bt_size, fd);
 
             close(fd);

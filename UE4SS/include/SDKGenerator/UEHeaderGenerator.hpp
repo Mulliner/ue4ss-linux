@@ -117,7 +117,7 @@ namespace RC::UEGenerator
 
         // Delete copy constructor and assignment operator
         GeneratedFile(const GeneratedFile&) = delete;
-        GeneratedFile(GeneratedFile&&) = default;
+        GeneratedFile(GeneratedFile&&);
         auto operator=(const GeneratedFile&) -> void = delete;
         auto operator=(GeneratedFile&&) -> void = delete;
 
@@ -153,7 +153,7 @@ namespace RC::UEGenerator
 
         // Delete copy constructor and assignment operator
         GeneratedSourceFile(const GeneratedSourceFile&) = delete;
-        GeneratedSourceFile(GeneratedSourceFile&&) = default;
+        GeneratedSourceFile(GeneratedSourceFile&&);
         auto operator=(const GeneratedSourceFile&) -> void = delete;
         auto operator=(GeneratedSourceFile&&) -> void = delete;
 
