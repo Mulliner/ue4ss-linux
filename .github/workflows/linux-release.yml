@@ -45,20 +45,20 @@ jobs:
           toolchain: stable
           components: rustfmt
 
-      - name: Configure CMake (Linux Shipping)
+      - name: Configure CMake (Linux Development)
         run: |
           export CC=gcc
           export CXX=g++
           cmake -B build_linux \
             -G Ninja \
-            -DCMAKE_BUILD_TYPE=Game__Shipping__Linux64 \
+            -DCMAKE_BUILD_TYPE=Game__Dev__Linux64 \
             -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
             -DUE4SS_GUI_ENABLED=ON \
             -DUE4SS_INPUT_ENABLED=OFF \
             -DUE4SS_PROFILERS=OFF \
             -Wno-dev
 
-      - name: Build UE4SS (Shipping)
+      - name: Build UE4SS (Development)
         run: |
           cmake --build build_linux --target UE4SS --verbose
 
@@ -84,7 +84,7 @@ jobs:
           Tag: ${{ inputs.tag_name }}
           Commit: $(git rev-parse HEAD)
           Branch: $(git branch --show-current)
-          Build Type: Game__Shipping__Linux64
+          Build Type: Game__Dev__Linux64
           Compiler: $(gcc --version | head -1)
           Build Host: ubuntu-24.04 (x86_64)
           GUI: Enabled (GLFW3/OpenGL3)
@@ -117,7 +117,7 @@ jobs:
             - Zero build warnings on Linux
 
             ### Build Configuration
-            - Build Type: Game__Shipping__Linux64
+            - Build Type: Game__Dev__Linux64
             - GUI: Enabled (GLFW3/OpenGL3)
             - Input: Disabled
             - Profilers: Disabled
