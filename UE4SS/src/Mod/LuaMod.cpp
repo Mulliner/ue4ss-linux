@@ -42,6 +42,7 @@
 #pragma warning(disable : 4005)
 #include <GUI/Dumpers.hpp>
 #include <UE4SSProgram.hpp>
+#include <UE4SSDebug.hpp>
 #include <USMapGenerator/Generator.hpp>
 #include <Unreal/Core/HAL/Platform.hpp>
 #include <Unreal/FFrame.hpp>
@@ -715,7 +716,7 @@ namespace RC
         m_scripts_path = scripts_path;
 
 #ifdef __linux__
-        fprintf(stderr, "[UE4SS] LuaMod constructor: mod '%s' scripts_path='%s' exists=%d\n",
+        UE4SS_DBG( "[UE4SS] LuaMod constructor: mod '%s' scripts_path='%s' exists=%d\n",
                 std::string(mod_name.begin(), mod_name.end()).c_str(),
                 m_scripts_path.string().c_str(), (int)std::filesystem::exists(m_scripts_path));
 #endif
@@ -5582,14 +5583,14 @@ Overloads:
     auto static setup_lua_classes_internal(const LuaMadeSimple::Lua& lua) -> void
     {
 #ifdef __linux__
-        fprintf(stderr, "[UE4SS] setup_lua_classes_internal: starting...\n");
+        UE4SS_DBG( "[UE4SS] setup_lua_classes_internal: starting...\n");
         // FText::StaticSize_Private is never set on Linux (set during TypeChecker scanning which is skipped).
         // Without this, FText's copy constructor throws std::runtime_error from FText::StaticSize().
         // Set it to sizeof(FText) as a fallback.
         if (Unreal::FText::StaticSize_Private < 0)
         {
             Unreal::FText::StaticSize_Private = sizeof(Unreal::FText);
-            fprintf(stderr, "[UE4SS] setup_lua_classes_internal: set FText::StaticSize_Private = %d (fallback)\n", (int)Unreal::FText::StaticSize_Private);
+            UE4SS_DBG( "[UE4SS] setup_lua_classes_internal: set FText::StaticSize_Private = %d (fallback)\n", (int)Unreal::FText::StaticSize_Private);
         }
 #endif
 
@@ -5677,7 +5678,7 @@ Overloads:
         unreal_version_class.make_global("UnrealVersion");
         // UnrealVersion Class -> END
 #ifdef __linux__
-        fprintf(stderr, "[UE4SS] setup_lua_classes_internal: UE4SS + UnrealVersion classes done.\n");
+        UE4SS_DBG( "[UE4SS] setup_lua_classes_internal: UE4SS + UnrealVersion classes done.\n");
 #endif
 
         // FName Class -> START
@@ -5689,7 +5690,7 @@ Overloads:
         lua_setglobal(lua.get_lua_state(), "NAME_None");
         // FName Class -> END
 #ifdef __linux__
-        fprintf(stderr, "[UE4SS] setup_lua_classes_internal: FName class done.\n");
+        UE4SS_DBG( "[UE4SS] setup_lua_classes_internal: FName class done.\n");
 #endif
 
         // FText Class -> START
@@ -5699,7 +5700,7 @@ Overloads:
         lua_setglobal(lua.get_lua_state(), "FText");
         // FText Class -> END
 #ifdef __linux__
-        fprintf(stderr, "[UE4SS] setup_lua_classes_internal: FText class done.\n");
+        UE4SS_DBG( "[UE4SS] setup_lua_classes_internal: FText class done.\n");
 #endif
 
         // FString Class -> START
@@ -5788,7 +5789,7 @@ Overloads:
         package_name.make_global("FPackageName");
         // FPackageName -> END
 #ifdef __linux__
-        fprintf(stderr, "[UE4SS] setup_lua_classes_internal: all classes done.\n");
+        UE4SS_DBG( "[UE4SS] setup_lua_classes_internal: all classes done.\n");
 #endif
     }
 
@@ -5802,27 +5803,27 @@ Overloads:
         try
         {
 #ifdef __linux__
-            fprintf(stderr, "[UE4SS] prepare_mod: '%s' calling open_all_libs()...\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
+            UE4SS_DBG( "[UE4SS] prepare_mod: '%s' calling open_all_libs()...\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
 #endif
             lua.open_all_libs();
 #ifdef __linux__
-            fprintf(stderr, "[UE4SS] prepare_mod: '%s' open_all_libs() done.\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
-            fprintf(stderr, "[UE4SS] prepare_mod: '%s' calling setup_lua_require_paths()...\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
+            UE4SS_DBG( "[UE4SS] prepare_mod: '%s' open_all_libs() done.\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
+            UE4SS_DBG( "[UE4SS] prepare_mod: '%s' calling setup_lua_require_paths()...\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
 #endif
             setup_lua_require_paths(lua);
 #ifdef __linux__
-            fprintf(stderr, "[UE4SS] prepare_mod: '%s' setup_lua_require_paths() done.\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
-            fprintf(stderr, "[UE4SS] prepare_mod: '%s' calling setup_lua_global_functions()...\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
+            UE4SS_DBG( "[UE4SS] prepare_mod: '%s' setup_lua_require_paths() done.\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
+            UE4SS_DBG( "[UE4SS] prepare_mod: '%s' calling setup_lua_global_functions()...\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
 #endif
             setup_lua_global_functions(lua);
 #ifdef __linux__
-            fprintf(stderr, "[UE4SS] prepare_mod: '%s' setup_lua_global_functions() done.\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
-            fprintf(stderr, "[UE4SS] prepare_mod: '%s' calling setup_lua_classes()...\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
+            UE4SS_DBG( "[UE4SS] prepare_mod: '%s' setup_lua_global_functions() done.\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
+            UE4SS_DBG( "[UE4SS] prepare_mod: '%s' calling setup_lua_classes()...\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
 #endif
             setup_lua_classes(lua);
 #ifdef __linux__
-            fprintf(stderr, "[UE4SS] prepare_mod: '%s' setup_lua_classes() done.\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
-            fprintf(stderr, "[UE4SS] prepare_mod: '%s' calling LuaModRef::construct()...\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
+            UE4SS_DBG( "[UE4SS] prepare_mod: '%s' setup_lua_classes() done.\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
+            UE4SS_DBG( "[UE4SS] prepare_mod: '%s' calling LuaModRef::construct()...\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
 #endif
 
             // Setup a global reference for this mod
@@ -5830,36 +5831,36 @@ Overloads:
             LuaType::LuaModRef::construct(lua, this);
             lua_setglobal(lua.get_lua_state(), "ModRef");
 #ifdef __linux__
-            fprintf(stderr, "[UE4SS] prepare_mod: '%s' LuaModRef::construct() done.\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
-            fprintf(stderr, "[UE4SS] prepare_mod: '%s' calling register_input_globals()...\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
+            UE4SS_DBG( "[UE4SS] prepare_mod: '%s' LuaModRef::construct() done.\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
+            UE4SS_DBG( "[UE4SS] prepare_mod: '%s' calling register_input_globals()...\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
 #endif
 
             // Setup all the input related globals (keys & modifier keys)
             register_input_globals(lua);
 #ifdef __linux__
-            fprintf(stderr, "[UE4SS] prepare_mod: '%s' register_input_globals() done.\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
-            fprintf(stderr, "[UE4SS] prepare_mod: '%s' calling register_all_property_types()...\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
+            UE4SS_DBG( "[UE4SS] prepare_mod: '%s' register_input_globals() done.\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
+            UE4SS_DBG( "[UE4SS] prepare_mod: '%s' calling register_all_property_types()...\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
 #endif
 
             register_all_property_types(lua);
 #ifdef __linux__
-            fprintf(stderr, "[UE4SS] prepare_mod: '%s' register_all_property_types() done.\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
-            fprintf(stderr, "[UE4SS] prepare_mod: '%s' calling register_object_flags()...\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
+            UE4SS_DBG( "[UE4SS] prepare_mod: '%s' register_all_property_types() done.\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
+            UE4SS_DBG( "[UE4SS] prepare_mod: '%s' calling register_object_flags()...\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
 #endif
             register_object_flags(lua);
 #ifdef __linux__
-            fprintf(stderr, "[UE4SS] prepare_mod: '%s' register_object_flags() done.\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
-            fprintf(stderr, "[UE4SS] prepare_mod: '%s' calling register_efindname()...\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
+            UE4SS_DBG( "[UE4SS] prepare_mod: '%s' register_object_flags() done.\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
+            UE4SS_DBG( "[UE4SS] prepare_mod: '%s' calling register_efindname()...\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
 #endif
             register_efindname(lua);
 #ifdef __linux__
-            fprintf(stderr, "[UE4SS] prepare_mod: '%s' register_efindname() done.\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
+            UE4SS_DBG( "[UE4SS] prepare_mod: '%s' register_efindname() done.\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
 #endif
 
             lua.set_nil();
             lua_setglobal(lua.get_lua_state(), "__OriginalReturnValue");
 #ifdef __linux__
-            fprintf(stderr, "[UE4SS] prepare_mod: '%s' completed successfully.\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
+            UE4SS_DBG( "[UE4SS] prepare_mod: '%s' completed successfully.\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
 #endif
         }
         catch (std::exception& e)
@@ -5988,63 +5989,63 @@ Overloads:
             m_main_thread_id = std::this_thread::get_id();
 
 #ifdef __linux__
-            fprintf(stderr, "[UE4SS] start_mod: '%s' calling prepare_mod()...\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
+            UE4SS_DBG( "[UE4SS] start_mod: '%s' calling prepare_mod()...\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
 #endif
             prepare_mod(lua());
 #ifdef __linux__
-            fprintf(stderr, "[UE4SS] start_mod: '%s' prepare_mod() done.\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
-            fprintf(stderr, "[UE4SS] start_mod: '%s' calling make_main_state()...\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
+            UE4SS_DBG( "[UE4SS] start_mod: '%s' prepare_mod() done.\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
+            UE4SS_DBG( "[UE4SS] start_mod: '%s' calling make_main_state()...\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
 #endif
             make_main_state(this, lua());
 #ifdef __linux__
-            fprintf(stderr, "[UE4SS] start_mod: '%s' make_main_state() done.\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
-            fprintf(stderr, "[UE4SS] start_mod: '%s' calling setup_lua_global_functions_main_state_only()...\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
+            UE4SS_DBG( "[UE4SS] start_mod: '%s' make_main_state() done.\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
+            UE4SS_DBG( "[UE4SS] start_mod: '%s' calling setup_lua_global_functions_main_state_only()...\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
 #endif
             setup_lua_global_functions_main_state_only();
 #ifdef __linux__
-            fprintf(stderr, "[UE4SS] start_mod: '%s' setup_lua_global_functions_main_state_only() done.\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
-            fprintf(stderr, "[UE4SS] start_mod: '%s' calling make_async_state()...\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
+            UE4SS_DBG( "[UE4SS] start_mod: '%s' setup_lua_global_functions_main_state_only() done.\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
+            UE4SS_DBG( "[UE4SS] start_mod: '%s' calling make_async_state()...\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
 #endif
             make_async_state(this, lua());
 #ifdef __linux__
-            fprintf(stderr, "[UE4SS] start_mod: '%s' make_async_state() done.\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
-            fprintf(stderr, "[UE4SS] start_mod: '%s' calling start_async_thread()...\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
+            UE4SS_DBG( "[UE4SS] start_mod: '%s' make_async_state() done.\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
+            UE4SS_DBG( "[UE4SS] start_mod: '%s' calling start_async_thread()...\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
 #endif
             start_async_thread();
 #ifdef __linux__
-            fprintf(stderr, "[UE4SS] start_mod: '%s' start_async_thread() done.\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
+            UE4SS_DBG( "[UE4SS] start_mod: '%s' start_async_thread() done.\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
 #endif
 
             m_is_started = true;
             fire_on_lua_start_for_cpp_mods();
 
 #ifdef __linux__
-            fprintf(stderr, "[UE4SS] start_mod: '%s' calling setup_custom_module_loader()...\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
+            UE4SS_DBG( "[UE4SS] start_mod: '%s' calling setup_custom_module_loader()...\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
 #endif
             // Set up the custom module loader for handling UTF-8 paths
             setup_custom_module_loader(main_lua());
 #ifdef __linux__
-            fprintf(stderr, "[UE4SS] start_mod: '%s' setup_custom_module_loader() done.\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
+            UE4SS_DBG( "[UE4SS] start_mod: '%s' setup_custom_module_loader() done.\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
 #endif
 
             // Use the scripts path that was already determined in the constructor
             std::filesystem::path main_script_path = m_scripts_path / STR("main.lua");
 
 #ifdef __linux__
-            fprintf(stderr, "[UE4SS] start_mod: '%s' main_script_path='%s' exists=%d\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str(), main_script_path.string().c_str(), (int)std::filesystem::exists(main_script_path));
+            UE4SS_DBG( "[UE4SS] start_mod: '%s' main_script_path='%s' exists=%d\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str(), main_script_path.string().c_str(), (int)std::filesystem::exists(main_script_path));
 #endif
 
             if (std::filesystem::exists(main_script_path))
             {
 #ifdef __linux__
-                fprintf(stderr, "[UE4SS] start_mod: '%s' calling load_and_execute_script()...\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
+                UE4SS_DBG( "[UE4SS] start_mod: '%s' calling load_and_execute_script()...\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
 #endif
                 if (!load_and_execute_script(main_script_path))
                 {
                     Output::send<LogLevel::Error>(STR("Failed to execute main script: {}\n"), ensure_str(main_script_path));
                 }
 #ifdef __linux__
-                fprintf(stderr, "[UE4SS] start_mod: '%s' load_and_execute_script() done.\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
+                UE4SS_DBG( "[UE4SS] start_mod: '%s' load_and_execute_script() done.\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
 #endif
             }
             else
@@ -6055,7 +6056,7 @@ Overloads:
                         ensure_str(m_scripts_path));
             }
 #ifdef __linux__
-            fprintf(stderr, "[UE4SS] start_mod: '%s' completed successfully.\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
+            UE4SS_DBG( "[UE4SS] start_mod: '%s' completed successfully.\n", std::string(m_mod_name.begin(), m_mod_name.end()).c_str());
 #endif
         }
         catch (const std::exception& e)

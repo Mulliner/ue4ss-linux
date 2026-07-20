@@ -12,6 +12,7 @@
 #include <format>
 #include <bit>
 #include <UE4SSProgram.hpp>
+#include <UE4SSDebug.hpp>
 
 #ifdef _WIN32
 #include <Unreal/Core/Windows/WindowsHWrapper.hpp>
@@ -133,11 +134,11 @@ namespace RC
 
             close(fd);
 
-            fprintf(stderr, "UE4SS: Crash report written to: %s\n", crash_path_utf8.c_str());
+            UE4SS_DBG( "UE4SS: Crash report written to: %s\n", crash_path_utf8.c_str());
         }
         else
         {
-            fprintf(stderr, "UE4SS: Failed to write crash report\n");
+            UE4SS_DBG( "UE4SS: Failed to write crash report\n");
         }
 
         // Re-raise the signal to get default behavior (core dump etc)

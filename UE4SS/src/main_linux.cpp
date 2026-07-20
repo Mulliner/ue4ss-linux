@@ -28,6 +28,7 @@
 #include <functional>
 
 #include "UE4SSProgram.hpp"
+#include <UE4SSDebug.hpp>
 #include <DynamicOutput/DynamicOutput.hpp>
 #include <Helpers/String.hpp>
 #include <String/StringType.hpp>
@@ -94,13 +95,13 @@ static void ue4ss_sigsegv_handler(int sig, siginfo_t* info, void* ucontext)
     // Check per-mod recovery first
     if (s_has_mod_jmpbuf)
     {
-        fprintf(stderr, "[UE4SS] Caught signal %d during mod execution, recovering...\n", sig);
+        UE4SS_ERR("[UE4SS] Caught signal %d during mod execution, recovering...\n", sig);
         s_has_mod_jmpbuf = false;
         siglongjmp(s_mod_jmpbuf, sig);
     }
     if (s_has_jmpbuf)
     {
-        fprintf(stderr, "[UE4SS] Caught signal %d during init, recovering...\n", sig);
+        UE4SS_ERR("[UE4SS] Caught signal %d during init, recovering...\n", sig);
         siglongjmp(s_init_jmpbuf, sig);
     }
     // No jump buffer - restore original handler and re-raise
@@ -116,7 +117,7 @@ extern "C" bool ue4ss_with_crash_recovery(const std::function<void()>& func)
     int sig = sigsetjmp(s_mod_jmpbuf, 1);
     if (sig != 0)
     {
-        fprintf(stderr, "[UE4SS] Recovered from signal %d during mod execution, continuing to next mod.\n", sig);
+        UE4SS_ERR("[UE4SS] Recovered from signal %d during mod execution, continuing to next mod.\n", sig);
         s_has_mod_jmpbuf = false;
         return false;
     }
@@ -158,11 +159,11 @@ static auto wait_for_game_ready() -> void
     // Wait for the game to fully initialize its memory layout.
     // UE5 games (like Palworld) need significant time to load.
     // We wait in stages and check if the game is still alive.
-    fprintf(stderr, "[UE4SS] Waiting for game to initialize...\n");
+    UE4SS_DBG("[UE4SS] Waiting for game to initialize...\n");
     for (int i = 0; i < 10; ++i)
     {
         sleep(1);
-        fprintf(stderr, "[UE4SS] Waiting... (%d/10)\n", i + 1);
+        UE4SS_VDBG("[UE4SS] Waiting... (%d/10)\n", i + 1);
     }
 }
 
@@ -197,7 +198,7 @@ static auto is_game_process() -> bool
         exe_name == "grep" || exe_name == "sed" || exe_name == "awk" ||
         exe_name == "sleep" || exe_name == "watch" || exe_name == "tee")
     {
-        fprintf(stderr, "[UE4SS] Skipping non-game process: %s\n", exe_path.c_str());
+        UE4SS_DBG("[UE4SS] Skipping non-game process: %s\n", exe_path.c_str());
         return false;
     }
 
@@ -211,15 +212,14 @@ static auto is_game_process() -> bool
     uintmax_t exe_size = std::filesystem::file_size(exe_path, ec);
     if (ec || exe_size < minimum_expected_game_binary_size)
     {
-        fprintf(stderr,
-                "[UE4SS] Skipping process, binary too small to be the game (%s, %llu bytes): %s\n",
+        UE4SS_DBG("[UE4SS] Skipping process, binary too small to be the game (%s, %llu bytes): %s\n",
                 ec ? "stat failed" : "size check",
                 static_cast<unsigned long long>(exe_size),
                 exe_path.c_str());
         return false;
     }
 
-    fprintf(stderr, "[UE4SS] Detected game executable: %s (%llu bytes)\n", exe_path.c_str(), static_cast<unsigned long long>(exe_size));
+    UE4SS_DBG("[UE4SS] Detected game executable: %s (%llu bytes)\n", exe_path.c_str(), static_cast<unsigned long long>(exe_size));
     return true;
 }
 
@@ -236,7 +236,7 @@ static auto thread_dll_start() -> void
         wait_for_game_ready();
 
         auto module_path = get_module_path();
-        fprintf(stderr, "[UE4SS] Library path: %s\n", module_path.string().c_str());
+        UE4SS_DBG("[UE4SS] Library path: %s\n", module_path.string().c_str());
 
         // Install signal handlers right before UE4SS init - the game may have
         // installed its own crash handler after our library loaded
@@ -246,22 +246,22 @@ static auto thread_dll_start() -> void
         int sig = sigsetjmp(s_init_jmpbuf, 1);
         if (sig != 0)
         {
-            fprintf(stderr, "[UE4SS] Recovered from signal %d. UE4SS init failed but game should continue.\n", sig);
+            UE4SS_ERR("[UE4SS] Recovered from signal %d. UE4SS init failed but game should continue.\n", sig);
             s_has_jmpbuf = false;
             restore_signal_handlers();
             return;
         }
         s_has_jmpbuf = true;
 
-        fprintf(stderr, "[UE4SS] Creating UE4SSProgram instance...\n");
+        UE4SS_DBG("[UE4SS] Creating UE4SSProgram instance...\n");
         s_program = new UE4SSProgram(module_path, {});
 
         // Re-install signal handlers in case the constructor overwrote them
         install_signal_handlers();
 
-        fprintf(stderr, "[UE4SS] Calling init()...\n");
+        UE4SS_DBG("[UE4SS] Calling init()...\n");
         s_program->init();
-        fprintf(stderr, "[UE4SS] init() completed successfully.\n");
+        UE4SS_DBG("[UE4SS] init() completed successfully.\n");
 
         s_has_jmpbuf = false;
         restore_signal_handlers();
@@ -274,20 +274,20 @@ static auto thread_dll_start() -> void
             }
             else
             {
-                fprintf(stderr, "[UE4SS] Error: %s\n", e->get_message());
+                UE4SS_ERR("[UE4SS] Error: %s\n", e->get_message());
             }
         }
 
         s_ue4ss_initialized.store(true, std::memory_order_release);
-        fprintf(stderr, "[UE4SS] Initialization complete.\n");
+        UE4SS_DBG("[UE4SS] Initialization complete.\n");
     }
     catch (const std::exception& e)
     {
-        fprintf(stderr, "[UE4SS] Exception during init: %s\n", e.what());
+        UE4SS_ERR("[UE4SS] Exception during init: %s\n", e.what());
     }
     catch (...)
     {
-        fprintf(stderr, "[UE4SS] Unknown exception during init\n");
+        UE4SS_ERR("[UE4SS] Unknown exception during init\n");
     }
 
     s_has_jmpbuf = false;
@@ -301,17 +301,17 @@ __attribute__((constructor))
 static void ue4ss_linux_init()
 {
     // Print copyright banner on startup
-    fprintf(stderr, "%s\n", COPYRIGHT_BANNER);
+    UE4SS_LOG("%s\n", COPYRIGHT_BANNER);
 
     // Anti-tamper check
     if (!verify_copyright())
     {
-        fprintf(stderr, "[UE4SS] WARNING: Copyright verification failed. This binary may have been tampered with.\n");
-        fprintf(stderr, "[UE4SS] Original source: https://github.com/XarminaEu/ue4ss-linux\n");
-        fprintf(stderr, "[UE4SS] Copyright (c) 2024-2026 rl-dev.de — https://rl-dev.de\n");
+        UE4SS_ERR("[UE4SS] WARNING: Copyright verification failed. This binary may have been tampered with.\n");
+        UE4SS_ERR("[UE4SS] Original source: https://github.com/XarminaEu/ue4ss-linux\n");
+        UE4SS_ERR("[UE4SS] Copyright (c) 2024-2026 rl-dev.de — https://rl-dev.de\n");
     }
 
-    fprintf(stderr, "[UE4SS] Library loaded via LD_PRELOAD, starting initialization thread...\n");
+    UE4SS_DBG("[UE4SS] Library loaded via LD_PRELOAD, starting initialization thread...\n");
     std::thread{thread_dll_start}.detach();
 }
 
@@ -321,7 +321,7 @@ static void ue4ss_linux_cleanup()
 {
     if (s_ue4ss_initialized.load(std::memory_order_acquire))
     {
-        fprintf(stderr, "[UE4SS] Cleaning up...\n");
+        UE4SS_DBG("[UE4SS] Cleaning up...\n");
         UE4SSProgram::static_cleanup();
         if (s_program)
         {

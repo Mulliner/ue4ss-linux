@@ -5,6 +5,7 @@
 #include <string>
 
 #include <DiscordWebhook.hpp>
+#include <UE4SSDebug.hpp>
 
 namespace RC
 {
@@ -60,7 +61,7 @@ namespace RC
         FILE* pipe = popen(cmd.c_str(), "r");
         if (!pipe)
         {
-            fprintf(stderr, "[UE4SS] DiscordWebhook: failed to run curl\n");
+            UE4SS_DBG( "[UE4SS] DiscordWebhook: failed to run curl\n");
             return false;
         }
 
@@ -75,7 +76,7 @@ namespace RC
         // curl outputs the HTTP status code
         if (result.empty())
         {
-            fprintf(stderr, "[UE4SS] DiscordWebhook: no response from curl\n");
+            UE4SS_DBG( "[UE4SS] DiscordWebhook: no response from curl\n");
             return false;
         }
 
@@ -85,7 +86,7 @@ namespace RC
             return true;
         }
 
-        fprintf(stderr, "[UE4SS] DiscordWebhook: HTTP status %s\n", result.c_str());
+        UE4SS_DBG( "[UE4SS] DiscordWebhook: HTTP status %s\n", result.c_str());
         return false;
     }
 

@@ -58,6 +58,7 @@
 #include <Unreal/Signatures.hpp>
 #include <Timer/ScopedTimer.hpp>
 #include <UE4SSProgram.hpp>
+#include <UE4SSDebug.hpp>
 #include <Unreal/AGameMode.hpp>
 #include <Unreal/AGameModeBase.hpp>
 #include <Unreal/GameplayStatics.hpp>
@@ -224,20 +225,20 @@ namespace RC
 
         try
         {
-            fprintf(stderr, "[UE4SS] Constructor: calling setup_paths()...\n");
+            UE4SS_DBG( "[UE4SS] Constructor: calling setup_paths()...\n");
             setup_paths(moduleFilePath);
-            fprintf(stderr, "[UE4SS] Constructor: setup_paths() done. root=%s\n", m_root_directory.string().c_str());
+            UE4SS_DBG( "[UE4SS] Constructor: setup_paths() done. root=%s\n", m_root_directory.string().c_str());
 
             // Auto-create UE4SS-settings.ini with default content if it doesn't exist
-            fprintf(stderr, "[UE4SS] Constructor: checking settings file at %s...\n", m_settings_path_and_file.string().c_str());
+            UE4SS_DBG( "[UE4SS] Constructor: checking settings file at %s...\n", m_settings_path_and_file.string().c_str());
             if (!std::filesystem::exists(m_settings_path_and_file))
             {
-                fprintf(stderr, "[UE4SS] Constructor: creating default settings file...\n");
+                UE4SS_DBG( "[UE4SS] Constructor: creating default settings file...\n");
                 std::error_code ec;
                 std::filesystem::create_directories(m_settings_path_and_file.parent_path(), ec);
                 if (ec)
                 {
-                    fprintf(stderr, "[UE4SS] Constructor: failed to create directories: %s\n", ec.message().c_str());
+                    UE4SS_DBG( "[UE4SS] Constructor: failed to create directories: %s\n", ec.message().c_str());
                 }
                 std::ofstream default_settings(m_settings_path_and_file);
                 if (default_settings.is_open())
@@ -359,11 +360,11 @@ namespace RC
                 }
             }
 
-            fprintf(stderr, "[UE4SS] Constructor: deserializing settings from %s...\n", m_settings_path_and_file.string().c_str());
+            UE4SS_DBG( "[UE4SS] Constructor: deserializing settings from %s...\n", m_settings_path_and_file.string().c_str());
             try
             {
                 settings_manager.deserialize(m_settings_path_and_file);
-                fprintf(stderr, "[UE4SS] Constructor: settings deserialized.\n");
+                UE4SS_DBG( "[UE4SS] Constructor: settings deserialized.\n");
             }
             catch (std::exception& e)
             {
@@ -379,14 +380,14 @@ namespace RC
                 }
             }
 
-            fprintf(stderr, "[UE4SS] Constructor: checking crash dump settings...\n");
+            UE4SS_DBG( "[UE4SS] Constructor: checking crash dump settings...\n");
             if (settings_manager.CrashDump.EnableDumping)
             {
                 m_crash_dumper.enable();
             }
 
             m_crash_dumper.set_full_memory_dump(settings_manager.CrashDump.FullMemoryDump);
-            fprintf(stderr, "[UE4SS] Constructor: done.\n");
+            UE4SS_DBG( "[UE4SS] Constructor: done.\n");
 
 #ifdef HAS_GUI
             m_debugging_gui.set_gfx_backend(settings_manager.Debug.GraphicsAPI);
@@ -527,23 +528,23 @@ namespace RC
             m_load_library_ex_w_hook->hook();
 #endif // _WIN32
 
-            fprintf(stderr, "[UE4SS] Calling SetupUnrealModules()...\n");
+            UE4SS_DBG( "[UE4SS] Calling SetupUnrealModules()...\n");
             Unreal::UnrealInitializer::SetupUnrealModules();
-            fprintf(stderr, "[UE4SS] SetupUnrealModules() done.\n");
+            UE4SS_DBG( "[UE4SS] SetupUnrealModules() done.\n");
 
-            fprintf(stderr, "[UE4SS] Setting up mod directory path...\n");
+            UE4SS_DBG( "[UE4SS] Setting up mod directory path...\n");
             setup_mod_directory_path();
-            fprintf(stderr, "[UE4SS] Mod directory path set.\n");
+            UE4SS_DBG( "[UE4SS] Mod directory path set.\n");
 
-            fprintf(stderr, "[UE4SS] Setting up mods...\n");
+            UE4SS_DBG( "[UE4SS] Setting up mods...\n");
             setup_mods();
-            fprintf(stderr, "[UE4SS] Mods setup done.\n");
+            UE4SS_DBG( "[UE4SS] Mods setup done.\n");
 
-            fprintf(stderr, "[UE4SS] Installing C++ mods...\n");
+            UE4SS_DBG( "[UE4SS] Installing C++ mods...\n");
             install_cpp_mods();
-            fprintf(stderr, "[UE4SS] Starting C++ mods...\n");
+            UE4SS_DBG( "[UE4SS] Starting C++ mods...\n");
             start_cpp_mods(IsInitialStartup::Yes);
-            fprintf(stderr, "[UE4SS] C++ mods started.\n");
+            UE4SS_DBG( "[UE4SS] C++ mods started.\n");
 
             if (m_has_game_specific_config)
             {
@@ -579,7 +580,7 @@ namespace RC
                 description += "Mods directory: " + to_string(ensure_str(m_mods_directories.empty() ? STR("") : m_mods_directories[0])) + "\n";
                 description += "UE4SS version: v3.0.1 Beta";
                 DiscordWebhook::send_embed(webhook_url, "UE4SS Status", description, 0x00FF00);
-                fprintf(stderr, "[UE4SS] Discord webhook notification sent.\n");
+                UE4SS_DBG( "[UE4SS] Discord webhook notification sent.\n");
             }
 #endif
         }
@@ -929,7 +930,7 @@ namespace RC
                     }
                     else
                     {
-                        fprintf(stderr, "[UE4SS] dlsym: GUObjectArray not found (stripped binary?)\n");
+                        UE4SS_DBG( "[UE4SS] dlsym: GUObjectArray not found (stripped binary?)\n");
                     }
                 };
 
@@ -944,7 +945,7 @@ namespace RC
                     }
                     else
                     {
-                        fprintf(stderr, "[UE4SS] dlsym: FName::ToString not found (stripped binary?)\n");
+                        UE4SS_DBG( "[UE4SS] dlsym: FName::ToString not found (stripped binary?)\n");
                     }
                 };
 
@@ -959,7 +960,7 @@ namespace RC
                     }
                     else
                     {
-                        fprintf(stderr, "[UE4SS] dlsym: UGameEngine::Tick not found (stripped binary?)\n");
+                        UE4SS_DBG( "[UE4SS] dlsym: UGameEngine::Tick not found (stripped binary?)\n");
                     }
                 };
 
@@ -974,7 +975,7 @@ namespace RC
                     }
                     else
                     {
-                        fprintf(stderr, "[UE4SS] dlsym: StaticConstructObject not found (stripped binary?)\n");
+                        UE4SS_DBG( "[UE4SS] dlsym: StaticConstructObject not found (stripped binary?)\n");
                     }
                 };
 
@@ -988,7 +989,7 @@ namespace RC
                     }
                     else
                     {
-                        fprintf(stderr, "[UE4SS] dlsym: GMalloc not found (stripped binary?)\n");
+                        UE4SS_DBG( "[UE4SS] dlsym: GMalloc not found (stripped binary?)\n");
                     }
                 };
 
@@ -1003,7 +1004,7 @@ namespace RC
                     }
                     else
                     {
-                        fprintf(stderr, "[UE4SS] dlsym: FName::FName not found (stripped binary?)\n");
+                        UE4SS_DBG( "[UE4SS] dlsym: FName::FName not found (stripped binary?)\n");
                     }
                 };
 
@@ -1017,18 +1018,18 @@ namespace RC
                     }
                     else
                     {
-                        fprintf(stderr, "[UE4SS] dlsym: GNatives not found (stripped binary?)\n");
+                        UE4SS_DBG( "[UE4SS] dlsym: GNatives not found (stripped binary?)\n");
                     }
                 };
 
                 // Override FUObjectHashTables::Get scan (no-op, non-fatal)
                 config.ScanOverrides.fuobject_hash_tables_get = [&](std::vector<SignatureContainer>&, Unreal::Signatures::ScanResult&) {
-                    fprintf(stderr, "[UE4SS] dlsym: FUObjectHashTables::Get skipped (no scan on Linux)\n");
+                    UE4SS_DBG( "[UE4SS] dlsym: FUObjectHashTables::Get skipped (no scan on Linux)\n");
                 };
 
                 // Override console manager singleton scan (no-op, non-fatal)
                 config.ScanOverrides.console_manager_singleton = [&](std::vector<SignatureContainer>&, Unreal::Signatures::ScanResult&) {
-                    fprintf(stderr, "[UE4SS] dlsym: console_manager_singleton skipped (no scan on Linux)\n");
+                    UE4SS_DBG( "[UE4SS] dlsym: console_manager_singleton skipped (no scan on Linux)\n");
                 };
 
                 // Override ProcessInternal scan — needed for BP mod loading (BeginPlay hooks, function calls)
@@ -1043,7 +1044,7 @@ namespace RC
                     }
                     else
                     {
-                        fprintf(stderr, "[UE4SS] dlsym: ProcessInternal not found (stripped binary?)\n");
+                        UE4SS_DBG( "[UE4SS] dlsym: ProcessInternal not found (stripped binary?)\n");
                     }
                 };
 
@@ -1059,7 +1060,7 @@ namespace RC
                     }
                     else
                     {
-                        fprintf(stderr, "[UE4SS] dlsym: ProcessLocalScriptFunction not found (stripped binary?)\n");
+                        UE4SS_DBG( "[UE4SS] dlsym: ProcessLocalScriptFunction not found (stripped binary?)\n");
                     }
                 };
 
@@ -1075,7 +1076,7 @@ namespace RC
                     }
                     else
                     {
-                        fprintf(stderr, "[UE4SS] dlsym: CallFunctionByNameWithArguments not found (stripped binary?)\n");
+                        UE4SS_DBG( "[UE4SS] dlsym: CallFunctionByNameWithArguments not found (stripped binary?)\n");
                     }
                 };
 
@@ -1091,7 +1092,7 @@ namespace RC
                     auto addresses_file = m_working_directory / STR("UE4SS_Addresses.ini");
                     if (std::filesystem::exists(addresses_file))
                     {
-                        fprintf(stderr, "[UE4SS] Loading manual address overrides from UE4SS_Addresses.ini\n");
+                        UE4SS_DBG( "[UE4SS] Loading manual address overrides from UE4SS_Addresses.ini\n");
                         try
                         {
                             auto file = File::open(ensure_str(addresses_file), File::OpenFor::Reading, File::OverwriteExistingFile::No, File::CreateIfNonExistent::No);
@@ -1121,57 +1122,57 @@ namespace RC
                             if (void* addr = try_get_address(STR("Addresses"), STR("GUObjectArray")))
                             {
                                 Unreal::UObjectArray::SetupGUObjectArrayAddress(addr);
-                                fprintf(stderr, "[UE4SS] Manual override: GUObjectArray = %p\n", addr);
+                                UE4SS_DBG( "[UE4SS] Manual override: GUObjectArray = %p\n", addr);
                             }
                             if (void* addr = try_get_address(STR("Addresses"), STR("FNameToString")))
                             {
                                 Unreal::FName::ToStringInternal.assign_address(addr);
-                                fprintf(stderr, "[UE4SS] Manual override: FNameToString = %p\n", addr);
+                                UE4SS_DBG( "[UE4SS] Manual override: FNameToString = %p\n", addr);
                             }
                             if (void* addr = try_get_address(STR("Addresses"), STR("FNameConstructor")))
                             {
                                 Unreal::FName::ConstructorInternal.assign_address(addr);
-                                fprintf(stderr, "[UE4SS] Manual override: FNameConstructor = %p\n", addr);
+                                UE4SS_DBG( "[UE4SS] Manual override: FNameConstructor = %p\n", addr);
                             }
                             if (void* addr = try_get_address(STR("Addresses"), STR("StaticConstructObject")))
                             {
                                 Unreal::UObjectGlobals::SetupStaticConstructObjectInternalAddress(addr);
-                                fprintf(stderr, "[UE4SS] Manual override: StaticConstructObject = %p\n", addr);
+                                UE4SS_DBG( "[UE4SS] Manual override: StaticConstructObject = %p\n", addr);
                             }
                             if (void* addr = try_get_address(STR("Addresses"), STR("GMalloc")))
                             {
                                 Unreal::GMalloc = std::bit_cast<Unreal::FMalloc**>(addr);
-                                fprintf(stderr, "[UE4SS] Manual override: GMalloc = %p\n", addr);
+                                UE4SS_DBG( "[UE4SS] Manual override: GMalloc = %p\n", addr);
                             }
                             if (void* addr = try_get_address(STR("Addresses"), STR("GNatives")))
                             {
                                 Unreal::GNatives_Internal = reinterpret_cast<Unreal::FNativeFuncPtr*>(addr);
-                                fprintf(stderr, "[UE4SS] Manual override: GNatives = %p\n", addr);
+                                UE4SS_DBG( "[UE4SS] Manual override: GNatives = %p\n", addr);
                             }
                             if (void* addr = try_get_address(STR("Addresses"), STR("UGameEngineTick")))
                             {
                                 Unreal::UEngine::TickInternal.assign_address(addr);
-                                fprintf(stderr, "[UE4SS] Manual override: UGameEngineTick = %p\n", addr);
+                                UE4SS_DBG( "[UE4SS] Manual override: UGameEngineTick = %p\n", addr);
                             }
                             if (void* addr = try_get_address(STR("Addresses"), STR("ProcessInternal")))
                             {
                                 Unreal::UObject::ProcessInternalInternal.assign_address(addr);
-                                fprintf(stderr, "[UE4SS] Manual override: ProcessInternal = %p\n", addr);
+                                UE4SS_DBG( "[UE4SS] Manual override: ProcessInternal = %p\n", addr);
                             }
                             if (void* addr = try_get_address(STR("Addresses"), STR("ProcessLocalScriptFunction")))
                             {
                                 Unreal::UObject::ProcessLocalScriptFunctionInternal.assign_address(addr);
-                                fprintf(stderr, "[UE4SS] Manual override: ProcessLocalScriptFunction = %p\n", addr);
+                                UE4SS_DBG( "[UE4SS] Manual override: ProcessLocalScriptFunction = %p\n", addr);
                             }
                             if (void* addr = try_get_address(STR("Addresses"), STR("CallFunctionByNameWithArguments")))
                             {
                                 Unreal::UObject::CallFunctionByNameWithArgumentsInternal.assign_address(addr);
-                                fprintf(stderr, "[UE4SS] Manual override: CallFunctionByNameWithArguments = %p\n", addr);
+                                UE4SS_DBG( "[UE4SS] Manual override: CallFunctionByNameWithArguments = %p\n", addr);
                             }
                         }
                         catch (const std::exception& e)
                         {
-                            fprintf(stderr, "[UE4SS] Error parsing UE4SS_Addresses.ini: %s\n", e.what());
+                            UE4SS_DBG( "[UE4SS] Error parsing UE4SS_Addresses.ini: %s\n", e.what());
                         }
                     }
                 }
@@ -1179,7 +1180,7 @@ namespace RC
                 dlclose(main_exe);
             }
 
-            fprintf(stderr, "[UE4SS] Linux scan overrides configured (UE5.1, dlsym-based)\n");
+            UE4SS_DBG( "[UE4SS] Linux scan overrides configured (UE5.1, dlsym-based)\n");
         }
 #endif
 
@@ -1405,45 +1406,45 @@ namespace RC
         Output::send<LogLevel::Warning>(STR("DebugGame Setting Enabled? {}\n"), Unreal::Version::DebugBuild);
         if (settings_manager.General.DoEarlyScan)
         {
-            fprintf(stderr, "[UE4SS] PreInitialize (early scan)...\n");
+            UE4SS_DBG( "[UE4SS] PreInitialize (early scan)...\n");
             Unreal::UnrealInitializer::PreInitialize(config);
-            fprintf(stderr, "[UE4SS] PreInitialize done. Scanning game...\n");
+            UE4SS_DBG( "[UE4SS] PreInitialize done. Scanning game...\n");
             try
             {
                 Unreal::UnrealInitializer::ScanGame();
-                fprintf(stderr, "[UE4SS] ScanGame done.\n");
+                UE4SS_DBG( "[UE4SS] ScanGame done.\n");
             }
             catch (std::runtime_error& e)
             {
-                fprintf(stderr, "[UE4SS] ScanGame error (non-fatal): %s\n", e.what());
+                UE4SS_DBG( "[UE4SS] ScanGame error (non-fatal): %s\n", e.what());
             }
         }
         cpp_mods_done_loading.store(true);
         cpp_mods_done_loading.notify_one();
         // Continuous scanning, and finish initializing after the game thread is unlocked.
-        fprintf(stderr, "[UE4SS] Calling UnrealInitializer::Initialize()...\n");
+        UE4SS_DBG( "[UE4SS] Calling UnrealInitializer::Initialize()...\n");
         Unreal::UnrealInitializer::Initialize(config);
-        fprintf(stderr, "[UE4SS] UnrealInitializer::Initialize() done.\n");
+        UE4SS_DBG( "[UE4SS] UnrealInitializer::Initialize() done.\n");
 
 #ifdef __linux__
         // On Linux, the engine tick hook is never installed (no function addresses),
         // so the RegisterEngineTickPreCallback lambda in on_program_start() that loads
         // Lua mods will never fire. Call them directly here.
-        fprintf(stderr, "[UE4SS] Linux: loading Lua mods directly (no engine tick hook)...\n");
+        UE4SS_DBG( "[UE4SS] Linux: loading Lua mods directly (no engine tick hook)...\n");
         TRY([&] {
-            fprintf(stderr, "[UE4SS] Linux: calling install_lua_mods()...\n");
+            UE4SS_DBG( "[UE4SS] Linux: calling install_lua_mods()...\n");
             install_lua_mods();
-            fprintf(stderr, "[UE4SS] Linux: install_lua_mods() done.\n");
+            UE4SS_DBG( "[UE4SS] Linux: install_lua_mods() done.\n");
             // Skip LuaMod::on_program_start() — it calls UObjectArray::AddUObjectDeleteListener
             // and registers UE hooks (LoadMap, InitGameState, BeginPlay, etc.) which all
             // require resolved function addresses that we don't have on Linux.
-            fprintf(stderr, "[UE4SS] Linux: skipping LuaMod::on_program_start() (requires UE hooks)\n");
+            UE4SS_DBG( "[UE4SS] Linux: skipping LuaMod::on_program_start() (requires UE hooks)\n");
             // Skip fire_program_start_for_cpp_mods() — C++ mods' on_program_start() may also access UE functions
-            fprintf(stderr, "[UE4SS] Linux: skipping fire_program_start_for_cpp_mods() (requires UE functions)\n");
-            fprintf(stderr, "[UE4SS] Linux: calling start_lua_mods()...\n");
+            UE4SS_DBG( "[UE4SS] Linux: skipping fire_program_start_for_cpp_mods() (requires UE functions)\n");
+            UE4SS_DBG( "[UE4SS] Linux: calling start_lua_mods()...\n");
             start_lua_mods();
-            fprintf(stderr, "[UE4SS] Linux: start_lua_mods() done.\n");
-            fprintf(stderr, "[UE4SS] Linux: Lua mods loaded.\n");
+            UE4SS_DBG( "[UE4SS] Linux: start_lua_mods() done.\n");
+            UE4SS_DBG( "[UE4SS] Linux: Lua mods loaded.\n");
         });
 #endif
 
@@ -1652,7 +1653,7 @@ namespace RC
         m_event_loop_thread_id = std::this_thread::get_id();
 
 #ifdef __linux__
-        fprintf(stderr, "[UE4SS] Linux: skipping on_program_start() (mods already loaded in init())\n");
+        UE4SS_DBG( "[UE4SS] Linux: skipping on_program_start() (mods already loaded in init())\n");
         // Skip on_program_start() — it calls ObjectDumper::init(), registers engine tick hooks,
         // and re-calls install_lua_mods/LuaMod::on_program_start/start_lua_mods inside a
         // RegisterEngineTickPreCallback lambda. All of these require UE function addresses.
@@ -1885,8 +1886,8 @@ namespace RC
                 {
                     auto mod_name = ensure_str(sub_directory.path().stem());
 #ifdef __linux__
-                    fprintf(stderr, "[UE4SS] setup_mods: found directory '%s' (full path: %s)\n", std::string(mod_name.begin(), mod_name.end()).c_str(), sub_directory.path().string().c_str());
-                    fprintf(stderr, "[UE4SS] setup_mods: has scripts/ = %s, has libs/ = %s\n", std::filesystem::exists(sub_directory.path() / "scripts") ? "yes" : "no", std::filesystem::exists(sub_directory.path() / "libs") ? "yes" : "no");
+                    UE4SS_DBG( "[UE4SS] setup_mods: found directory '%s' (full path: %s)\n", std::string(mod_name.begin(), mod_name.end()).c_str(), sub_directory.path().string().c_str());
+                    UE4SS_DBG( "[UE4SS] setup_mods: has scripts/ = %s, has libs/ = %s\n", std::filesystem::exists(sub_directory.path() / "scripts") ? "yes" : "no", std::filesystem::exists(sub_directory.path() / "libs") ? "yes" : "no");
 #endif
                     // Create the mod but don't install it yet
                     if (!find_mod_by_name<LuaMod>(mod_name) && std::filesystem::exists(sub_directory.path() / "scripts"))
@@ -2142,7 +2143,7 @@ namespace RC
                     if (!mod || !dynamic_cast<ModType*>(mod) || mod->is_started())
                     {
 #ifdef __linux__
-                        if (!mod) fprintf(stderr, "[UE4SS] Mod '%s' not found or not installed\n", std::string(mod_name.begin(), mod_name.end()).c_str());
+                        if (!mod) UE4SS_DBG( "[UE4SS] Mod '%s' not found or not installed\n", std::string(mod_name.begin(), mod_name.end()).c_str());
 #endif
                         continue;
                     }
@@ -2150,11 +2151,11 @@ namespace RC
                     if (!mod_enabled.empty() && mod_enabled[0] == STR('1'))
                     {
 #ifdef __linux__
-                        fprintf(stderr, "[UE4SS] Starting %s mod '%s'\n", std::is_same_v<ModType, LuaMod> ? "Lua" : "C++", std::string(mod->get_name().begin(), mod->get_name().end()).c_str());
+                        UE4SS_DBG( "[UE4SS] Starting %s mod '%s'\n", std::is_same_v<ModType, LuaMod> ? "Lua" : "C++", std::string(mod->get_name().begin(), mod->get_name().end()).c_str());
                         bool ok = ue4ss_with_crash_recovery([&]() { mod->start_mod(); });
                         if (!ok)
                         {
-                            fprintf(stderr, "[UE4SS] Mod '%s' crashed during startup, continuing to next mod.\n", std::string(mod->get_name().begin(), mod->get_name().end()).c_str());
+                            UE4SS_DBG( "[UE4SS] Mod '%s' crashed during startup, continuing to next mod.\n", std::string(mod->get_name().begin(), mod->get_name().end()).c_str());
                         }
 #else
                         Output::send(STR("Starting {} mod '{}'\n"), std::is_same_v<ModType, LuaMod> ? STR("Lua") : STR("C++"), mod->get_name().data());
@@ -2219,11 +2220,11 @@ namespace RC
 
                 Output::send(STR("Mod '{}' has enabled.txt, starting mod.\n"), mod->get_name().data());
 #ifdef __linux__
-                fprintf(stderr, "[UE4SS] Mod '%s' has enabled.txt, starting mod.\n", std::string(mod->get_name().begin(), mod->get_name().end()).c_str());
+                UE4SS_DBG( "[UE4SS] Mod '%s' has enabled.txt, starting mod.\n", std::string(mod->get_name().begin(), mod->get_name().end()).c_str());
                 bool ok = ue4ss_with_crash_recovery([&]() { mod->start_mod(); });
                 if (!ok)
                 {
-                    fprintf(stderr, "[UE4SS] Mod '%s' crashed during startup (enabled.txt), continuing to next mod.\n", std::string(mod->get_name().begin(), mod->get_name().end()).c_str());
+                    UE4SS_DBG( "[UE4SS] Mod '%s' crashed during startup (enabled.txt), continuing to next mod.\n", std::string(mod->get_name().begin(), mod->get_name().end()).c_str());
                 }
 #else
                 mod->start_mod();

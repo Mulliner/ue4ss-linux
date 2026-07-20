@@ -3,6 +3,7 @@
 #include <IniParser/Ini.hpp>
 #include <SettingsManager.hpp>
 #include <UE4SSProgram.hpp>
+#include <UE4SSDebug.hpp>
 
 #define REGISTER_STRING_SETTING(member_var, section_name, key)                                                                                                 \
     try                                                                                                                                                        \
@@ -49,7 +50,7 @@ namespace RC
         // after parsing. This is likely due to memory corruption from the game's own
         // memory allocator interfering with our std::wstring operations.
         // Use hardcoded defaults instead.
-        fprintf(stderr, "[UE4SS] SettingsManager: using hardcoded defaults on Linux (INI parser bypass)\n");
+        UE4SS_DBG( "[UE4SS] SettingsManager: using hardcoded defaults on Linux (INI parser bypass)\n");
 
         General.EnableHotReloadSystem = true;
         General.EnableAutoReloadingLuaMods = true;
@@ -94,7 +95,7 @@ namespace RC
             std::ifstream ini_file(file_name);
             if (ini_file.is_open())
             {
-                fprintf(stderr, "[UE4SS] SettingsManager: INI file opened for DiscordWebhookURL scan\n");
+                UE4SS_DBG( "[UE4SS] SettingsManager: INI file opened for DiscordWebhookURL scan\n");
                 std::string line;
                 while (std::getline(ini_file, line))
                 {
@@ -109,11 +110,11 @@ namespace RC
                         if (!url.empty())
                         {
                             General.DiscordWebhookURL = StringType(url.begin(), url.end());
-                            fprintf(stderr, "[UE4SS] SettingsManager: found DiscordWebhookURL in INI (%zu chars)\n", url.size());
+                            UE4SS_DBG( "[UE4SS] SettingsManager: found DiscordWebhookURL in INI (%zu chars)\n", url.size());
                         }
                         else
                         {
-                            fprintf(stderr, "[UE4SS] SettingsManager: DiscordWebhookURL found in INI but is EMPTY - please set it in UE4SS-settings.ini\n");
+                            UE4SS_DBG( "[UE4SS] SettingsManager: DiscordWebhookURL found in INI but is EMPTY - please set it in UE4SS-settings.ini\n");
                         }
                         break;
                     }
@@ -121,32 +122,32 @@ namespace RC
             }
             else
             {
-                fprintf(stderr, "[UE4SS] SettingsManager: could not open INI file for DiscordWebhookURL scan: %s\n", file_name.string().c_str());
+                UE4SS_DBG( "[UE4SS] SettingsManager: could not open INI file for DiscordWebhookURL scan: %s\n", file_name.string().c_str());
             }
         }
 
-        fprintf(stderr, "[UE4SS] SettingsManager: hardcoded defaults applied.\n");
+        UE4SS_DBG( "[UE4SS] SettingsManager: hardcoded defaults applied.\n");
 #else
-        fprintf(stderr, "[UE4SS] SettingsManager: opening file %s...\n", file_name.string().c_str());
+        UE4SS_DBG( "[UE4SS] SettingsManager: opening file %s...\n", file_name.string().c_str());
         auto file = File::open(file_name, File::OpenFor::Reading, File::OverwriteExistingFile::No, File::CreateIfNonExistent::Yes);
-        fprintf(stderr, "[UE4SS] SettingsManager: file opened, parsing...\n");
+        UE4SS_DBG( "[UE4SS] SettingsManager: file opened, parsing...\n");
         Ini::Parser parser;
         parser.parse(file);
-        fprintf(stderr, "[UE4SS] SettingsManager: parse done.\n");
+        UE4SS_DBG( "[UE4SS] SettingsManager: parse done.\n");
         file.close();
-        fprintf(stderr, "[UE4SS] SettingsManager: file closed.\n");
+        UE4SS_DBG( "[UE4SS] SettingsManager: file closed.\n");
 
         constexpr static File::CharType section_overrides[] = STR("Overrides");
-        fprintf(stderr, "[UE4SS] SettingsManager: reading Overrides section...\n");
+        UE4SS_DBG( "[UE4SS] SettingsManager: reading Overrides section...\n");
         try
         {
             REGISTER_STRING_SETTING(Overrides.ModsFolderPath, section_overrides, ModsFolderPath)
         }
         catch (std::exception& e)
         {
-            fprintf(stderr, "[UE4SS] SettingsManager: exception in Overrides: %s\n", e.what());
+            UE4SS_DBG( "[UE4SS] SettingsManager: exception in Overrides: %s\n", e.what());
         }
-        fprintf(stderr, "[UE4SS] SettingsManager: Overrides done.\n");
+        UE4SS_DBG( "[UE4SS] SettingsManager: Overrides done.\n");
 
         auto mods_paths_list = parser.get_list(section_overrides);
         mods_paths_list.for_each(STR("ModsFolderPaths"), [](const StringType& key, const Ini::Value& value) {
@@ -161,14 +162,14 @@ namespace RC
         });
 
         REGISTER_STRING_SETTING(Overrides.ControllingModsTxt, section_overrides, ControllingModsTxt)
-        fprintf(stderr, "[UE4SS] SettingsManager: reading General section...\n");
+        UE4SS_DBG( "[UE4SS] SettingsManager: reading General section...\n");
 
         constexpr static File::CharType section_general[] = STR("General");
         REGISTER_BOOL_SETTING(General.EnableHotReloadSystem, section_general, EnableHotReloadSystem)
-        fprintf(stderr, "[UE4SS] SettingsManager: EnableHotReloadSystem done.\n");
+        UE4SS_DBG( "[UE4SS] SettingsManager: EnableHotReloadSystem done.\n");
         StringType hot_reload_key{};
         REGISTER_STRING_SETTING(hot_reload_key, section_general, HotReloadKey)
-        fprintf(stderr, "[UE4SS] SettingsManager: HotReloadKey done.\n");
+        UE4SS_DBG( "[UE4SS] SettingsManager: HotReloadKey done.\n");
         if (!hot_reload_key.empty())
         {
             try
@@ -184,9 +185,9 @@ namespace RC
         REGISTER_BOOL_SETTING(General.UseCache, section_general, UseCache)
         REGISTER_BOOL_SETTING(General.InvalidateCacheIfDLLDiffers, section_general, InvalidateCacheIfDLLDiffers)
         REGISTER_BOOL_SETTING(General.EnableDebugKeyBindings, section_general, EnableDebugKeyBindings)
-        fprintf(stderr, "[UE4SS] SettingsManager: reading SecondsToScanBeforeGivingUp...\n");
+        UE4SS_DBG( "[UE4SS] SettingsManager: reading SecondsToScanBeforeGivingUp...\n");
         REGISTER_INT64_SETTING(General.SecondsToScanBeforeGivingUp, section_general, SecondsToScanBeforeGivingUp)
-        fprintf(stderr, "[UE4SS] SettingsManager: SecondsToScanBeforeGivingUp done.\n");
+        UE4SS_DBG( "[UE4SS] SettingsManager: SecondsToScanBeforeGivingUp done.\n");
         REGISTER_BOOL_SETTING(General.UseUObjectArrayCache, section_general, bUseUObjectArrayCache)
         REGISTER_BOOL_SETTING(General.DoEarlyScan, section_general, DoEarlyScan)
         REGISTER_BOOL_SETTING(General.SearchByAddress, section_general, bEnableSeachByMemoryAddress)
