@@ -128,7 +128,7 @@ On Linux, if no settings file is found, hardcoded defaults are used.
 
 ## Known Limitations
 
-- **Work in Progress**: Der gesamte Code wird von Windows auf Linux umgearbeitet. Da dies laufend passiert, kann es nebenbei zu Fehlern kommen. Nicht alle Windows-spezifischen Codepfade sind vollständig getestet — bei Problemen bitte [Issue melden](https://github.com/XarminaEu/ue4ss-linux/issues).
+- **Work in Progress**: The entire codebase is being ported from Windows to Linux. Since this is an ongoing process, bugs may still occur. Not all Windows-specific code paths have been fully tested — please [report issues](https://github.com/XarminaEu/ue4ss-linux/issues) if you encounter problems.
 - **Limited Mode**: UE function addresses are not resolved on stripped Linux binaries. Mod functionality is limited to Lua scripting and basic operations.
 - **No GUI**: GUI is disabled in the Linux build (headless mode only).
 - **No Blueprint Mod Loader**: Blueprint mod loading requires resolved UE functions not available on stripped Linux binaries.
