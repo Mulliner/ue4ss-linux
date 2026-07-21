@@ -1787,10 +1787,10 @@ namespace RC
                     m_pause_events_processing = true;
 
                     // Remember existing mod names
-                    std::vector<StringType> existing_mod_names;
+                    std::vector<std::string> existing_mod_names;
                     for (const auto& mod : m_mods)
                     {
-                        existing_mod_names.push_back(mod->get_name());
+                        existing_mod_names.push_back(ensure_str(mod->get_name()));
                     }
 
                     // Scan for new mods
