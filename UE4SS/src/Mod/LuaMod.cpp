@@ -952,6 +952,15 @@ namespace RC
         lua_seti(L, -2, 1);
     
         lua_pop(L, 2); // Clean up stack: searchers, package
+
+        // Override dofile and loadfile with mod-relative versions
+        lua_pushlightuserdata(L, this);
+        lua_pushcclosure(L, custom_dofile, 1);
+        lua_setglobal(L, "dofile");
+
+        lua_pushlightuserdata(L, this);
+        lua_pushcclosure(L, custom_loadfile, 1);
+        lua_setglobal(L, "loadfile");
     }
 
     // Static C function for the module searcher
@@ -981,11 +990,17 @@ namespace RC
         std::string mod_name_str = to_utf8_string(mod_name);
         std::string scripts_path_str = normalize_path_for_lua(scripts_path);
         
+        // Convert module name to path (replace '.' with '/' for subdirectory support)
+        std::string module_path = module_name;
+        std::replace(module_path.begin(), module_path.end(), '.', '/');
+        
         // Try different path combinations
         std::vector<std::string> paths_to_try = {
-            scripts_path_str + "/" + module_name + ".lua",
-            mods_path_str + "/shared/" + module_name + ".lua",
-            mods_path_str + "/shared/" + module_name + "/" + module_name + ".lua"
+            scripts_path_str + "/" + module_path + ".lua",
+            scripts_path_str + "/" + module_path + "/init.lua",
+            mods_path_str + "/shared/" + module_path + ".lua",
+            mods_path_str + "/shared/" + module_path + "/" + module_path + ".lua",
+            mods_path_str + "/shared/" + module_path + "/init.lua"
         };
         
         // Try each path
@@ -1052,32 +1067,22 @@ namespace RC
             // Create chunk name for debugging
             std::string chunk_name = "@" + path;
             
-            // Load the script as a function that returns the module
-            std::string module_wrapper = "return function()\n" + std::string(buffer.data(), buffer.size()) + "\nend";
-            
-            if (luaL_loadbuffer(L, module_wrapper.c_str(), module_wrapper.size(), chunk_name.c_str()) != LUA_OK)
+            // Load the script directly (no wrapping)
+            if (luaL_loadbuffer(L, buffer.data(), buffer.size(), chunk_name.c_str()) != LUA_OK)
             {
                 attempted_paths_str += "\n\t" + path + " (syntax error: " + lua_tostring(L, -1) + ")";
                 lua_pop(L, 1); // Pop error message
                 continue;
             }
             
-            // Execute to get the loader function
-            if (lua_pcall(L, 0, 1, 0) != LUA_OK)
-            {
-                attempted_paths_str += "\n\t" + path + " (execution error: " + lua_tostring(L, -1) + ")";
-                lua_pop(L, 1); // Pop error message
-                continue;
-            }
-            
-            // Cache the loaded module
+            // Cache the loaded chunk (not yet executed, require() will call it)
             lua_getglobal(L, "ue4ss_loaded_modules");
             lua_pushstring(L, path.c_str());
-            lua_pushvalue(L, -3); // Copy the function
+            lua_pushvalue(L, -3); // Copy the chunk
             lua_settable(L, -3);
             lua_pop(L, 1); // Pop ue4ss_loaded_modules
             
-            // Return the loader function
+            // Return the loader function (chunk) for require() to execute
             return 1;
         }
         
@@ -1085,6 +1090,152 @@ namespace RC
         std::string error_msg = "module '" + std::string(module_name) + "' not found:" + attempted_paths_str;
         lua_pushstring(L, error_msg.c_str());
         return 1;
+    }
+
+    // Helper: resolve a relative path against the mod's scripts directory
+    // Returns absolute path if file exists, empty path otherwise
+    static auto resolve_mod_relative_path(lua_State* L, const char* raw_path) -> std::filesystem::path
+    {
+        auto* lua_mod = static_cast<LuaMod*>(lua_touserdata(L, lua_upvalueindex(1)));
+        if (!lua_mod || !raw_path)
+            return {};
+
+        std::string path_str = raw_path;
+
+        // If absolute path, use as-is
+        if (!path_str.empty() && (path_str[0] == '/' || (path_str.size() > 1 && path_str[1] == ':')))
+        {
+            return std::filesystem::path(path_str);
+        }
+
+        // Resolve relative to scripts directory
+        const auto& scripts_path = lua_mod->get_scripts_path();
+        auto resolved = scripts_path / path_str;
+
+        // If file exists directly, use it
+        if (std::filesystem::exists(resolved))
+            return resolved;
+
+        // Try with .lua extension
+        auto with_ext = resolved;
+        with_ext += ".lua";
+        if (std::filesystem::exists(with_ext))
+            return with_ext;
+
+        // Try as directory with init.lua
+        auto init_path = resolved / "init.lua";
+        if (std::filesystem::exists(init_path))
+            return init_path;
+
+        // Not found — return the resolved path anyway for error messages
+        return resolved;
+    }
+
+    int LuaMod::custom_dofile(lua_State* L)
+    {
+        const char* raw_path = luaL_optstring(L, 1, nullptr);
+        if (!raw_path)
+        {
+            return 0;
+        }
+
+        auto resolved = resolve_mod_relative_path(L, raw_path);
+        if (resolved.empty() || !std::filesystem::exists(resolved))
+        {
+            auto* lua_mod = static_cast<LuaMod*>(lua_touserdata(L, lua_upvalueindex(1)));
+            std::string mod_name = lua_mod ? to_utf8_string(lua_mod->get_name()) : "unknown";
+            Output::send<LogLevel::Error>(STR("Mod '{}': dofile('{}') — file not found at {}\n"),
+                ensure_str(mod_name), ensure_str(raw_path), ensure_str(resolved));
+            lua_pushnil(L);
+            lua_pushstring(L, fmt::format("file not found: {}", resolved.string()).c_str());
+            return 2;
+        }
+
+        // Read file content
+        std::ifstream file(resolved, std::ios::binary);
+        if (!file.is_open())
+        {
+            lua_pushnil(L);
+            lua_pushstring(L, fmt::format("cannot open: {}", resolved.string()).c_str());
+            return 2;
+        }
+
+        file.seekg(0, std::ios::end);
+        std::streamsize size = file.tellg();
+        file.seekg(0, std::ios::beg);
+
+        std::vector<char> buffer(size);
+        file.read(buffer.data(), size);
+        file.close();
+
+        std::string chunk_name = "@" + resolved.string();
+
+        if (luaL_loadbuffer(L, buffer.data(), buffer.size(), chunk_name.c_str()) != LUA_OK)
+        {
+            return lua_error(L);
+        }
+
+        // Execute the chunk
+        int nresults = lua_gettop(L) - 1; // minus the chunk itself
+        if (lua_pcall(L, 0, LUA_MULTRET, 0) != LUA_OK)
+        {
+            return lua_error(L);
+        }
+
+        nresults = lua_gettop(L) - nresults + 1; // actual results returned
+        return nresults;
+    }
+
+    int LuaMod::custom_loadfile(lua_State* L)
+    {
+        const char* raw_path = luaL_optstring(L, 1, nullptr);
+        if (!raw_path)
+        {
+            lua_pushnil(L);
+            lua_pushstring(L, "loadfile: path argument required");
+            return 2;
+        }
+
+        auto resolved = resolve_mod_relative_path(L, raw_path);
+        if (resolved.empty() || !std::filesystem::exists(resolved))
+        {
+            auto* lua_mod = static_cast<LuaMod*>(lua_touserdata(L, lua_upvalueindex(1)));
+            std::string mod_name = lua_mod ? to_utf8_string(lua_mod->get_name()) : "unknown";
+            Output::send<LogLevel::Error>(STR("Mod '{}': loadfile('{}') — file not found at {}\n"),
+                ensure_str(mod_name), ensure_str(raw_path), ensure_str(resolved));
+            lua_pushnil(L);
+            lua_pushstring(L, fmt::format("file not found: {}", resolved.string()).c_str());
+            return 2;
+        }
+
+        // Read file content
+        std::ifstream file(resolved, std::ios::binary);
+        if (!file.is_open())
+        {
+            lua_pushnil(L);
+            lua_pushstring(L, fmt::format("cannot open: {}", resolved.string()).c_str());
+            return 2;
+        }
+
+        file.seekg(0, std::ios::end);
+        std::streamsize size = file.tellg();
+        file.seekg(0, std::ios::beg);
+
+        std::vector<char> buffer(size);
+        file.read(buffer.data(), size);
+        file.close();
+
+        std::string chunk_name = "@" + resolved.string();
+
+        if (luaL_loadbuffer(L, buffer.data(), buffer.size(), chunk_name.c_str()) != LUA_OK)
+        {
+            lua_pushnil(L);
+            lua_pushstring(L, lua_tostring(L, -1));
+            lua_remove(L, -2);
+            return 2;
+        }
+
+        return 1; // Return the loaded chunk
     }
 
     auto LuaMod::setup_lua_require_paths(const LuaMadeSimple::Lua& lua) const -> void
@@ -1109,12 +1260,16 @@ namespace RC
 
             // Create path strings with forward slashes for Lua
             std::string script_path = fmt::format(";{}/?.lua", scripts_path_utf8);
+            std::string script_init_path = fmt::format(";{}/?/init.lua", scripts_path_utf8);
             std::string shared_path = fmt::format(";{}/shared/?.lua", mods_dir_utf8);
             std::string shared_nested_path = fmt::format(";{}/shared/?/?.lua", mods_dir_utf8);
+            std::string shared_init_path = fmt::format(";{}/shared/?/init.lua", mods_dir_utf8);
 
             current_paths.append(script_path);
+            current_paths.append(script_init_path);
             current_paths.append(shared_path);
             current_paths.append(shared_nested_path);
+            current_paths.append(shared_init_path);
 
             lua_pushstring(lua_state, current_paths.c_str());
             lua_setfield(lua_state, -2, "path");
@@ -1125,8 +1280,13 @@ namespace RC
             lua_pop(lua_state, 1);
 
             // Create cpath strings
+#ifdef __linux__
+            std::string script_dll_path = fmt::format(";{}/?.so", scripts_path_utf8);
+            std::string mod_dll_path = fmt::format(";{}/{}/?/?.so", mods_dir_utf8, mod_name_utf8);
+#else
             std::string script_dll_path = fmt::format(";{}/?.dll", scripts_path_utf8);
             std::string mod_dll_path = fmt::format(";{}/{}/?/?.dll", mods_dir_utf8, mod_name_utf8);
+#endif
 
             current_cpaths.append(script_dll_path);
             current_cpaths.append(mod_dll_path);

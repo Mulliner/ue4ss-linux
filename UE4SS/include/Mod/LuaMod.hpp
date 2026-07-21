@@ -204,6 +204,8 @@ namespace RC
         static auto ensure_process_event_hooked(LuaMod* mod) -> void;
 
         static auto custom_module_searcher(lua_State* L) -> int;
+        static auto custom_dofile(lua_State* L) -> int;
+        static auto custom_loadfile(lua_State* L) -> int;
         auto setup_custom_module_loader(const LuaMadeSimple::Lua* lua_state) -> void;
         auto load_and_execute_script(const std::filesystem::path& script_path) -> bool;
         auto setup_lua_require_paths(const LuaMadeSimple::Lua& lua) const -> void;
