@@ -1798,7 +1798,7 @@ namespace RC
                     {
                         if (!sub_directory.is_directory()) continue;
 
-                        auto mod_name = to_string(sub_directory.path().stem());
+                        auto mod_name = to_string(sub_directory.path().stem().string());
 
                         // Skip if already loaded
                         bool already_exists = false;
@@ -1849,7 +1849,7 @@ namespace RC
                         if (has_scripts(sub_directory.path()))
                         {
                             Output::send(STR("New Lua mod detected: '{}', starting...\n"), ensure_str(mod_name));
-                            auto new_mod = std::make_unique<LuaMod>(*this, StringType{ensure_str(mod_name)}, ensure_str(sub_directory.path()));
+                            auto new_mod = std::make_unique<LuaMod>(*this, ensure_str(mod_name), ensure_str(sub_directory.path().string()));
                             LuaMod* new_mod_ptr = new_mod.get();
                             m_mods.emplace_back(std::move(new_mod));
                             // Watch the new mod's scripts directory
@@ -1859,7 +1859,7 @@ namespace RC
                         else if (has_libs(sub_directory.path()))
                         {
                             Output::send(STR("New C++ mod detected: '{}', starting...\n"), ensure_str(mod_name));
-                            auto new_mod = std::make_unique<CppMod>(*this, StringType{ensure_str(mod_name)}, ensure_str(sub_directory.path()));
+                            auto new_mod = std::make_unique<CppMod>(*this, ensure_str(mod_name), ensure_str(sub_directory.path().string()));
                             CppMod* new_mod_ptr = new_mod.get();
                             m_mods.emplace_back(std::move(new_mod));
 #ifdef __linux__
