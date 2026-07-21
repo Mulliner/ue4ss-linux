@@ -1798,7 +1798,7 @@ namespace RC
                     {
                         if (!sub_directory.is_directory()) continue;
 
-                        auto mod_name = to_string(sub_directory.path().stem().string());
+                        auto mod_name = sub_directory.path().stem().string();
 
                         // Skip if already loaded
                         bool already_exists = false;
