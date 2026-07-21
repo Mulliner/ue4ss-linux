@@ -137,7 +137,7 @@ namespace RC
         {
         }
 
-        RC_UE4SS_API virtual auto on_dll_load(StringViewType dll_name) -> void
+        RC_UE4SS_API virtual auto on_lib_load(StringViewType lib_name) -> void
         {
         }
 

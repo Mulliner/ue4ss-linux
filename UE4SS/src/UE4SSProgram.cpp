@@ -185,35 +185,35 @@ namespace RC
     }
 
 #ifdef _WIN32
-    void* HookedLoadLibraryA(const char* dll_name)
+    void* HookedLoadLibraryA(const char* lib_name)
     {
         UE4SSProgram& program = UE4SSProgram::get_program();
-        HMODULE lib = PLH::FnCast(program.m_hook_trampoline_load_library_a, &LoadLibraryA)(dll_name);
-        program.fire_dll_load_for_cpp_mods(ensure_str(dll_name));
+        HMODULE lib = PLH::FnCast(program.m_hook_trampoline_load_library_a, &LoadLibraryA)(lib_name);
+        program.fire_lib_load_for_cpp_mods(ensure_str(lib_name));
         return lib;
     }
 
-    void* HookedLoadLibraryExA(const char* dll_name, void* file, int32_t flags)
+    void* HookedLoadLibraryExA(const char* lib_name, void* file, int32_t flags)
     {
         UE4SSProgram& program = UE4SSProgram::get_program();
-        HMODULE lib = PLH::FnCast(program.m_hook_trampoline_load_library_ex_a, &LoadLibraryExA)(dll_name, file, flags);
-        program.fire_dll_load_for_cpp_mods(ensure_str(dll_name));
+        HMODULE lib = PLH::FnCast(program.m_hook_trampoline_load_library_ex_a, &LoadLibraryExA)(lib_name, file, flags);
+        program.fire_lib_load_for_cpp_mods(ensure_str(lib_name));
         return lib;
     }
 
-    void* HookedLoadLibraryW(const wchar_t* dll_name)
+    void* HookedLoadLibraryW(const wchar_t* lib_name)
     {
         UE4SSProgram& program = UE4SSProgram::get_program();
-        HMODULE lib = PLH::FnCast(program.m_hook_trampoline_load_library_w, &LoadLibraryW)(dll_name);
-        program.fire_dll_load_for_cpp_mods(ToCharTypePtr(dll_name));
+        HMODULE lib = PLH::FnCast(program.m_hook_trampoline_load_library_w, &LoadLibraryW)(lib_name);
+        program.fire_lib_load_for_cpp_mods(ToCharTypePtr(lib_name));
         return lib;
     }
 
-    void* HookedLoadLibraryExW(const wchar_t* dll_name, void* file, int32_t flags)
+    void* HookedLoadLibraryExW(const wchar_t* lib_name, void* file, int32_t flags)
     {
         UE4SSProgram& program = UE4SSProgram::get_program();
-        HMODULE lib = PLH::FnCast(program.m_hook_trampoline_load_library_ex_w, &LoadLibraryExW)(dll_name, file, flags);
-        program.fire_dll_load_for_cpp_mods(ToCharTypePtr(dll_name));
+        HMODULE lib = PLH::FnCast(program.m_hook_trampoline_load_library_ex_w, &LoadLibraryExW)(lib_name, file, flags);
+        program.fire_lib_load_for_cpp_mods(ToCharTypePtr(lib_name));
         return lib;
     }
 #endif // _WIN32
@@ -2090,13 +2090,13 @@ namespace RC
         }
     }
 
-    auto UE4SSProgram::fire_dll_load_for_cpp_mods(StringViewType dll_name) -> void
+    auto UE4SSProgram::fire_lib_load_for_cpp_mods(StringViewType lib_name) -> void
     {
         for (const auto& mod : m_mods)
         {
             if (auto cpp_mod = dynamic_cast<CppMod*>(mod.get()); cpp_mod)
             {
-                cpp_mod->fire_dll_load(dll_name);
+                cpp_mod->fire_lib_load(lib_name);
             }
         }
     }
@@ -3268,7 +3268,7 @@ namespace RC
         delete &get_program();
 
         // Do cleanup of static objects here
-        // This function is called right before the DLL detaches from the game
+        // This function is called right before the library detaches from the game
         // Including when the player hits the 'X' button to exit the game
     }
 

@@ -28,15 +28,15 @@ namespace RC
         typedef void (*uninstall_type)(CppUserModBase*);
 
       private:
-        StringType m_dll_filename{};
-        std::filesystem::path m_dlls_path;
+        StringType m_lib_filename{};
+        std::filesystem::path m_libs_path;
 
 #ifdef _WIN32
-        Unreal::Windows::HMODULE m_main_dll_module = NULL;
+        Unreal::Windows::HMODULE m_main_lib_module = NULL;
 #else
-        void* m_main_dll_module = nullptr;
+        void* m_main_lib_module = nullptr;
 #endif
-        void* m_dlls_path_cookie = nullptr;
+        void* m_libs_path_cookie = nullptr;
         start_type m_start_mod_func = nullptr;
         uninstall_type m_uninstall_mod_func = nullptr;
 
@@ -72,7 +72,7 @@ namespace RC
         auto fire_ui_init() -> void override;
         auto fire_program_start() -> void override;
         auto fire_update() -> void override;
-        auto fire_dll_load(StringViewType dll_name) -> void;
+        auto fire_lib_load(StringViewType lib_name) -> void;
         auto fire_on_cpp_mods_loaded() -> void;
     };
 } // namespace RC

@@ -3105,7 +3105,7 @@ namespace RC::GUI
                 if (ImGui::IsItemHovered())
                 {
                     ImGui::BeginTooltip();
-                    ImGui::Text("Saves your filters to <UE4SS.dll install location>/liveview/filters.meta.json");
+                    ImGui::Text("Saves your filters to <libUE4SS.so install location>/liveview/filters.meta.json");
                     ImGui::EndTooltip();
                 }
 

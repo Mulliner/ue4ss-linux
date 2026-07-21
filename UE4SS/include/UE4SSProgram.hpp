@@ -28,7 +28,7 @@
 
 #include <String/StringType.hpp>
 
-// Used to set up ImGui context and allocator in DLL mods
+// Used to set up ImGui context and allocator in shared library mods
 #ifdef HAS_GUI
 #define UE4SS_ENABLE_IMGUI()                                                                                                                                   \
     /* Wait for UE4SS to create the imgui context. */                                                                                                          \
@@ -237,7 +237,7 @@ namespace RC
         auto fire_ui_init_for_cpp_mods() -> void;
 #endif
         auto fire_program_start_for_cpp_mods() -> void;
-        auto fire_dll_load_for_cpp_mods(StringViewType dll_name) -> void;
+        auto fire_lib_load_for_cpp_mods(StringViewType lib_name) -> void;
         auto fire_on_cpp_mods_loaded_for_cpp_mods() -> void;
 
       public:
@@ -380,10 +380,10 @@ namespace RC
         RC_UE4SS_API static auto parse_semicolon_separated_string(const StringType& string) -> std::vector<StringType>;
 
       private:
-        friend void* HookedLoadLibraryA(const char* dll_name);
-        friend void* HookedLoadLibraryExA(const char* dll_name, void* file, int32_t flags);
-        friend void* HookedLoadLibraryW(const wchar_t* dll_name);
-        friend void* HookedLoadLibraryExW(const wchar_t* dll_name, void* file, int32_t flags);
+        friend void* HookedLoadLibraryA(const char* lib_name);
+        friend void* HookedLoadLibraryExA(const char* lib_name, void* file, int32_t flags);
+        friend void* HookedLoadLibraryW(const wchar_t* lib_name);
+        friend void* HookedLoadLibraryExW(const wchar_t* lib_name, void* file, int32_t flags);
         friend auto gui_render_thread_tick() -> void;
     };
 } // namespace RC

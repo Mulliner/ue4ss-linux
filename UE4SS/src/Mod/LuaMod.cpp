@@ -209,7 +209,7 @@ namespace RC
                     // current_param_offset += func_prop->GetSize();
 
                     // Set up a call to a handler for this type of Unreal property (the param)
-                    // The FName is being used as a key for an unordered_map which has the types & corresponding handlers filled right after the dll is injected
+                    // The FName is being used as a key for an unordered_map which has the types & corresponding handlers filled right after the library is injected
                     const LuaType::PusherParams pusher_params{.operation = LuaType::Operation::GetParam,
                                                               .lua = lua_data.lua,
                                                               .base = nullptr,
@@ -1281,15 +1281,15 @@ namespace RC
 
             // Create cpath strings
 #ifdef __linux__
-            std::string script_dll_path = fmt::format(";{}/?.so", scripts_path_utf8);
-            std::string mod_dll_path = fmt::format(";{}/{}/?/?.so", mods_dir_utf8, mod_name_utf8);
+            std::string script_lib_path = fmt::format(";{}/?.so", scripts_path_utf8);
+            std::string mod_lib_path = fmt::format(";{}/{}/?/?.so", mods_dir_utf8, mod_name_utf8);
 #else
-            std::string script_dll_path = fmt::format(";{}/?.dll", scripts_path_utf8);
-            std::string mod_dll_path = fmt::format(";{}/{}/?/?.dll", mods_dir_utf8, mod_name_utf8);
+            std::string script_lib_path = fmt::format(";{}/?.dll", scripts_path_utf8);
+            std::string mod_lib_path = fmt::format(";{}/{}/?/?.dll", mods_dir_utf8, mod_name_utf8);
 #endif
 
-            current_cpaths.append(script_dll_path);
-            current_cpaths.append(mod_dll_path);
+            current_cpaths.append(script_lib_path);
+            current_cpaths.append(mod_lib_path);
 
             lua_pushstring(lua_state, current_cpaths.c_str());
             lua_setfield(lua_state, -2, "cpath");
