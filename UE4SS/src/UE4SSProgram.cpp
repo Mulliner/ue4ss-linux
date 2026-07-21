@@ -1765,15 +1765,19 @@ namespace RC
                 if (is_cpp_mod)
                 {
                     auto staged_file = file / mod_name;
+#ifdef __linux__
+                    staged_file.replace_extension(".so");
+#else
                     staged_file.replace_extension(".dll");
+#endif
                     if (!std::filesystem::exists(staged_file))
                     {
                         return;
                     }
-                    // TODO: Unload the dll (uninstall).
-                    //       Delete 'main.dll'.
-                    //       Rename 'staged_file' to 'main.dll'.
-                    //       Load 'main.dll' (install & start).
+                    // TODO: Unload the library (uninstall).
+                    //       Delete 'main.so'/'main.dll'.
+                    //       Rename 'staged_file' to 'main.so'/'main.dll'.
+                    //       Load 'main.so'/'main.dll' (install & start).
 
                     // TODO: To reload C++ mods, we need to add a way to unregister hooks, and then C++ mods need to unregister on they get notified that they're getting unloaded.
                     //       For Lua mods, there's no notification, but we track all the hooks internally, so we can unregister automatically, we just need to

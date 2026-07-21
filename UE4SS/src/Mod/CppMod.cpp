@@ -74,7 +74,7 @@ namespace RC
 
         if (!m_main_dll_module)
         {
-            Output::send<LogLevel::Warning>(STR("Failed to load dll <{}> for mod {}, error: {}\n"),
+            Output::send<LogLevel::Warning>(STR("Failed to load library <{}> for mod {}, error: {}\n"),
                                             ensure_str(dll_path), m_mod_name, SysError(GetLastError()).c_str());
             set_installable(false);
             return;
@@ -126,7 +126,7 @@ namespace RC
         {
             if (!Output::has_internal_error())
             {
-                Output::send<LogLevel::Warning>(STR("Failed to load dll <{}> for mod {}, because: {}\n"),
+                Output::send<LogLevel::Warning>(STR("Failed to load library <{}> for mod {}, because: {}\n"),
                                                 ensure_str((m_dlls_path / m_dll_filename)),
                                                 m_mod_name,
                                                 ensure_str(e.what()));
