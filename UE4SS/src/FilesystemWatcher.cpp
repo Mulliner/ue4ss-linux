@@ -11,7 +11,7 @@ namespace RC
     FilesystemWatcher::FilesystemWatcher(FilesystemWatcher&& other) noexcept
         : m_paths(std::move(other.m_paths)), m_handle(other.m_handle), m_watches(std::move(other.m_watches)), m_stop_source(std::move(other.m_stop_source)),
           m_polling_thread(std::move(other.m_polling_thread)), m_state(std::move(other.m_state)), m_last_notification(other.m_last_notification),
-          m_min_duration_between_notifications(other.m_min_duration_between_notifications)
+          m_min_duration_between_notifications(other.m_min_duration_between_notifications), m_wd_to_path(std::move(other.m_wd_to_path))
     {
     }
 
@@ -26,12 +26,18 @@ namespace RC
         m_state = std::move(other.m_state);
         m_last_notification = other.m_last_notification;
         m_min_duration_between_notifications = other.m_min_duration_between_notifications;
+        m_wd_to_path = std::move(other.m_wd_to_path);
         return *this;
     }
 
     auto FilesystemWatcher::add_dir(const std::filesystem::path& dir) -> void
     {
         m_paths.emplace_back(dir);
+        // If polling has already started, initialize the watcher for this new directory immediately
+        if (m_polling_thread.joinable() && m_handle)
+        {
+            init_filesystem_watcher(*this, dir);
+        }
     }
 
     auto FilesystemWatcher::start_async_polling(const FilesystemWatch::NotificationFunctionType& notify) -> void

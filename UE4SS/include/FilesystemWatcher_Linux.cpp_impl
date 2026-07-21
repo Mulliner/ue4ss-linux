@@ -31,11 +31,15 @@ namespace RC
             }
         }
         auto file_descriptor = handle_to_fd(watcher.m_handle);
-        if (inotify_add_watch(file_descriptor, path.c_str(), IN_CREATE) == -1)
+        // Watch for file creation, modification, and moves
+        int wd = inotify_add_watch(file_descriptor, path.c_str(), IN_CREATE | IN_MODIFY | IN_MOVED_TO | IN_DELETE);
+        if (wd == -1)
         {
             Output::send<LogLevel::Error>(STR("Error watching '{}': {}"), ensure_str(path.string()), ensure_str(std::strerror(errno)));
             return;
         }
+        // Track wd → path mapping so we can reconstruct full paths in poll()
+        watcher.m_wd_to_path[wd] = path;
     }
 
     FilesystemWatcher::~FilesystemWatcher()
@@ -98,29 +102,45 @@ namespace RC
                         for (auto ptr = buffer; ptr < buffer + length; ptr += sizeof(inotify_event) + event->len)
                         {
                             event = std::bit_cast<const inotify_event*>(ptr);
-                            if (event->mask & IN_CREATE && event->len > 0)
+                            if (event->len <= 0)
                             {
-                                std::string name_string{event->name};
-                                // Attempting to allow non-standard names for libraries on Linux.
-                                // The standard name is lib<Name>.so.
-                                if (name_string.starts_with("lib") && name_string.ends_with(".so"))
+                                continue;
+                            }
+
+                            // Check for relevant events: creation, modification, move, deletion
+                            uint32_t relevant_mask = IN_CREATE | IN_MODIFY | IN_MOVED_TO | IN_DELETE;
+                            if (!(event->mask & relevant_mask))
+                            {
+                                continue;
+                            }
+
+                            // Look up the watched directory path for this wd
+                            auto wd_it = m_wd_to_path.find(event->wd);
+                            if (wd_it == m_wd_to_path.end())
+                            {
+                                continue;
+                            }
+
+                            const auto& watched_dir = wd_it->second;
+                            std::string name_string{event->name};
+
+                            // Debounce: skip if too soon after last notification
+                            auto now = std::chrono::high_resolution_clock::now();
+                            if (now - m_last_notification < m_min_duration_between_notifications)
+                            {
+                                continue;
+                            }
+
+                            // Notify all watches with the watched directory path
+                            // The callback uses file.parent_path().filename() for mod name
+                            // and file.filename().string() for directory name
+                            m_last_notification = now;
+                            for (const auto& watch : m_watches)
+                            {
+                                if (watch.name == "*" || name_string == watch.name)
                                 {
-                                    name_string.erase(0, 3);
-                                }
-                                auto name = std::filesystem::path{name_string};
-                                name.replace_extension();
-                                for (const auto& watch : m_watches)
-                                {
-                                    if (watch.name == "*" || name == watch.name)
-                                    {
-                                        auto now = std::chrono::high_resolution_clock::now();
-                                        if (now - m_last_notification < m_min_duration_between_notifications)
-                                        {
-                                            continue;
-                                        }
-                                        m_last_notification = now;
-                                        watch.notify(name, false);
-                                    }
+                                    // Pass the watched directory path so callback can determine mod name
+                                    watch.notify(watched_dir, false);
                                 }
                             }
                         }

@@ -12,6 +12,8 @@
 #include <chrono>
 #include <functional>
 #include <cstdint>
+#include <map>
+#include <string>
 
 #include <Sync.hpp>
 
@@ -45,7 +47,8 @@ namespace RC
         std::thread m_polling_thread{};
         ThreadState m_state{};
         std::chrono::time_point<std::chrono::high_resolution_clock> m_last_notification{std::chrono::high_resolution_clock::now()};
-        std::chrono::milliseconds m_min_duration_between_notifications{4000};
+        std::chrono::milliseconds m_min_duration_between_notifications{1000};
+        std::map<int32_t, std::filesystem::path> m_wd_to_path{};
 
       private:
         static constexpr int32_t s_polling_timeout_ms = 100;

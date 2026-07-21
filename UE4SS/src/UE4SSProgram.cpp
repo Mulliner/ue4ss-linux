@@ -1737,6 +1737,7 @@ namespace RC
         FilesystemWatcher filesystem_watcher{};
         if (settings_manager.General.EnableAutoReloadingLuaMods)
         {
+            // Watch each mod's scripts/libs directory
             for (const auto& mod : m_mods)
             {
                 if (dynamic_cast<CppMod*>(mod.get()))
@@ -1753,10 +1754,128 @@ namespace RC
                     filesystem_watcher.add_dir(lua_mod->get_scripts_path());
                 }
             }
-            filesystem_watcher.start_async_polling([&](const std::filesystem::path& file, bool match_all) {
+            // Also watch the mods root directories for new mod folders
+            for (const auto& mods_dir : m_mods_directories)
+            {
+                if (std::filesystem::exists(mods_dir))
+                {
+                    filesystem_watcher.add_dir(mods_dir);
+                }
+            }
+
+            filesystem_watcher.start_async_polling([&](const std::filesystem::path& watched_dir, bool match_all) {
                 ScopedThreadSynchronizer thread_synchronizer{filesystem_watcher.get_thread_state()};
-                const auto mod_name = file.parent_path().filename();
-                auto dir_name = file.filename().string();
+                auto dir_name = watched_dir.filename().string();
+                std::transform(dir_name.begin(), dir_name.end(), dir_name.begin(), ::tolower);
+
+                // Check if this is a mods root directory (not a Scripts/libs folder)
+                bool is_mods_root = false;
+                for (const auto& mods_dir : m_mods_directories)
+                {
+                    if (watched_dir == mods_dir)
+                    {
+                        is_mods_root = true;
+                        break;
+                    }
+                }
+
+                if (is_mods_root)
+                {
+                    // A new mod directory was created in the mods root
+                    // Scan for new mods and start them
+                    Output::send(STR("Change detected in mods directory, scanning for new mods...\n"));
+                    m_pause_events_processing = true;
+
+                    // Remember existing mod names
+                    std::vector<StringType> existing_mod_names;
+                    for (const auto& mod : m_mods)
+                    {
+                        existing_mod_names.push_back(mod->get_name());
+                    }
+
+                    // Scan for new mods
+                    for (const auto& sub_directory : std::filesystem::directory_iterator(watched_dir))
+                    {
+                        if (!sub_directory.is_directory()) continue;
+
+                        auto mod_name = ensure_str(sub_directory.path().stem());
+
+                        // Skip if already loaded
+                        bool already_exists = false;
+                        for (const auto& existing_name : existing_mod_names)
+                        {
+                            if (existing_name == mod_name)
+                            {
+                                already_exists = true;
+                                break;
+                            }
+                        }
+                        if (already_exists) continue;
+
+                        // Check if it's a Lua or C++ mod
+#ifdef __linux__
+                        auto has_scripts = [](const std::filesystem::path& p) -> bool {
+                            for (const auto& e : std::filesystem::directory_iterator(p))
+                            {
+                                if (e.is_directory())
+                                {
+                                    auto n = e.path().filename().string();
+                                    std::transform(n.begin(), n.end(), n.begin(), ::tolower);
+                                    if (n == "scripts") return true;
+                                }
+                            }
+                            return false;
+                        };
+                        auto has_libs = [](const std::filesystem::path& p) -> bool {
+                            for (const auto& e : std::filesystem::directory_iterator(p))
+                            {
+                                if (e.is_directory())
+                                {
+                                    auto n = e.path().filename().string();
+                                    std::transform(n.begin(), n.end(), n.begin(), ::tolower);
+                                    if (n == "libs") return true;
+                                }
+                            }
+                            return false;
+                        };
+#else
+                        auto has_scripts = [](const std::filesystem::path& p) -> bool {
+                            return std::filesystem::exists(p / "Scripts");
+                        };
+                        auto has_libs = [](const std::filesystem::path& p) -> bool {
+                            return std::filesystem::exists(p / "dlls");
+                        };
+#endif
+                        if (has_scripts(sub_directory.path()))
+                        {
+                            Output::send(STR("New Lua mod detected: '{}', starting...\n"), ensure_str(mod_name));
+                            auto new_mod = std::make_unique<LuaMod>(*this, StringType{mod_name}, ensure_str(sub_directory.path()));
+                            LuaMod* new_mod_ptr = new_mod.get();
+                            m_mods.emplace_back(std::move(new_mod));
+                            // Watch the new mod's scripts directory
+                            filesystem_watcher.add_dir(new_mod_ptr->get_scripts_path());
+                            new_mod_ptr->start_mod();
+                        }
+                        else if (has_libs(sub_directory.path()))
+                        {
+                            Output::send(STR("New C++ mod detected: '{}', starting...\n"), ensure_str(mod_name));
+                            auto new_mod = std::make_unique<CppMod>(*this, StringType{mod_name}, ensure_str(sub_directory.path()));
+                            CppMod* new_mod_ptr = new_mod.get();
+                            m_mods.emplace_back(std::move(new_mod));
+#ifdef __linux__
+                            filesystem_watcher.add_dir(new_mod_ptr->get_path() / "libs");
+#else
+                            filesystem_watcher.add_dir(new_mod_ptr->get_path() / "dlls");
+#endif
+                            new_mod_ptr->start_mod();
+                        }
+                    }
+                    m_pause_events_processing = false;
+                    return;
+                }
+
+                // It's a Scripts or libs directory change
+                const auto mod_name = watched_dir.parent_path().filename();
 #ifdef __linux__
                 const auto is_cpp_mod = String::iequal(dir_name, "libs");
 #else
@@ -1764,7 +1883,7 @@ namespace RC
 #endif
                 if (is_cpp_mod)
                 {
-                    auto staged_file = file / mod_name;
+                    auto staged_file = watched_dir / mod_name;
 #ifdef __linux__
                     staged_file.replace_extension(".so");
 #else
@@ -1786,6 +1905,7 @@ namespace RC
                 }
                 else
                 {
+                    // Lua mod file change — reload the mod
                     auto mod = find_lua_mod_by_name(ensure_str(mod_name), IsInstalled::Yes, IsStarted::Yes);
                     if (!mod)
                     {
