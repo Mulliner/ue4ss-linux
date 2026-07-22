@@ -29,6 +29,10 @@ jobs:
         with:
           submodules: recursive
           fetch-depth: 0
+          fetch-tags: true
+
+      - name: Fetch all tags
+        run: git fetch --tags --force origin
 
       - name: Install dependencies
         run: |
@@ -65,8 +69,13 @@ jobs:
       - name: Generate Changelog
         id: changelog
         run: |
-          # Get the previous release tag (sorted by version, excluding current tag)
-          PREV_TAG=$(git tag --sort=-v:refname | grep -v "${{ inputs.tag_name }}" | head -1)
+          # Get the previous release tag — filter for linux-dev tags, sorted by creation date
+          PREV_TAG=$(git tag --sort=-creatordate | grep "linux-dev" | grep -v "${{ inputs.tag_name }}" | head -1)
+          
+          # If no linux-dev tag found, fall back to any tag
+          if [ -z "$PREV_TAG" ]; then
+            PREV_TAG=$(git tag --sort=-creatordate | grep -v "${{ inputs.tag_name }}" | head -1)
+          fi
           
           echo "Previous tag: ${PREV_TAG:-none}"
           
