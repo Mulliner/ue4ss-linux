@@ -241,7 +241,7 @@ static auto thread_dll_start() -> void
         {
             UE4SS_ERR("[UE4SS] WARNING: Copyright verification failed. This binary may have been tampered with.\n");
             UE4SS_ERR("[UE4SS] Original source: https://github.com/XarminaEu/ue4ss-linux\n");
-            UE4SS_ERR("[UE4SS] Copyright (c) 2024-2026 rl-dev.de — https://rl-dev.de\n");
+            UE4SS_ERR("[UE4SS] Copyright (c) 2026 rl-dev.de — https://rl-dev.de\n");
         }
 
         wait_for_game_ready();

@@ -203,6 +203,11 @@ namespace RC::Unreal::UObjectGlobals
 
     UObject* FindObject(UClass* Class, UObject* InOuter, const TCHAR* InName, bool bExactClass, ObjectSearcher* InSearcher)
     {
+        if (!GUObjectArray)
+        {
+            return nullptr;
+        }
+
         bool bObjectIsCached{};
         if (!Class && !InOuter && InName && !bExactClass)
         {

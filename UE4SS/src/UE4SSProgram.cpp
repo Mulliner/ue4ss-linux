@@ -49,6 +49,8 @@
 #include <Mod/Mod.hpp>
 #ifdef __linux__
 #include <DiscordWebhook.hpp>
+#include <link.h>
+#include <elf.h>
 #endif
 #include <ObjectDumper/ObjectToString.hpp>
 #include <SDKGenerator/Generator.hpp>
@@ -942,10 +944,159 @@ namespace RC
                     {
                         Unreal::UObjectArray::SetupGUObjectArrayAddress(addr);
                         scan_result.SuccessMessage.emplace_back(STR("GUObjectArray found via dlsym"));
+                        return;
+                    }
+
+                    UE4SS_DBG( "[UE4SS] dlsym: GUObjectArray not found (stripped binary?), trying heuristic scan...\n");
+
+                    // Heuristic scan: search writable PT_LOAD segments for FUObjectArray pattern
+                    // FUObjectArray layout (UE5.1):
+                    //   +0x00: int32 ObjFirstGCIndex (0 or small positive)
+                    //   +0x04: int32 ObjLastNonGCIndex (0 or small positive)
+                    //   +0x08: int32 MaxObjectsNotConsideredByGC (0 or small positive)
+                    //   +0x0C: bool OpenForDisregardForGC (0 or 1, padded to 4 bytes)
+                    //   +0x10: TUObjectArray ObjObjects
+                    //     +0x10: FUObjectItem** Objects (valid pointer)
+                    //     +0x18: FUObjectItem* PreAllocatedObjects (0 or valid pointer)
+                    //     +0x20: int32 MaxElements (> 0, reasonable)
+                    //     +0x24: int32 NumElements (> 0, < MaxElements)
+                    //     +0x28: int32 MaxChunks (> 0, small)
+                    //     +0x2C: int32 NumChunks (> 0, <= MaxChunks)
+                    // Total FUObjectArray size: 0xB8
+
+                    struct SegmentInfo {
+                        uint8_t* start;
+                        size_t size;
+                    };
+                    std::vector<SegmentInfo> writable_segments;
+
+                    dl_iterate_phdr([](struct dl_phdr_info* info, size_t, void* data) -> int {
+                        auto* segs = static_cast<std::vector<SegmentInfo>*>(data);
+                        // The first entry (empty name or empty path) is the main executable
+                        if (info->dlpi_name[0] != '\0') {
+                            // Also check if it's the main executable by path
+                            const char* name = info->dlpi_name;
+                            if (!strstr(name, "Pal") && !strstr(name, "pal") && !strstr(name, "UE") && !strstr(name, "ue")) {
+                                return 0;
+                            }
+                        }
+                        for (int i = 0; i < info->dlpi_phnum; i++) {
+                            const ElfW(Phdr)* phdr = &info->dlpi_phdr[i];
+                            if (phdr->p_type == PT_LOAD && (phdr->p_flags & PF_W)) {
+                                uint8_t* seg_start = reinterpret_cast<uint8_t*>(info->dlpi_addr + phdr->p_vaddr);
+                                size_t seg_size = phdr->p_memsz;
+                                if (seg_size > 0x100) {
+                                    segs->push_back({seg_start, seg_size});
+                                }
+                            }
+                        }
+                        return 0;
+                    }, &writable_segments);
+
+                    UE4SS_DBG( "[UE4SS] Heuristic scan: found %zu writable segments\n", writable_segments.size());
+
+                    auto validate_fuobjectarray = [](uint8_t* candidate) -> bool {
+                        // Check ObjFirstGCIndex (offset 0x00) - should be 0 or small positive
+                        int32_t obj_first_gc = *reinterpret_cast<int32_t*>(candidate + 0x00);
+                        if (obj_first_gc < 0 || obj_first_gc > 1000000) return false;
+
+                        // Check ObjLastNonGCIndex (offset 0x04) - should be 0 or small positive
+                        int32_t obj_last_non_gc = *reinterpret_cast<int32_t*>(candidate + 0x04);
+                        if (obj_last_non_gc < 0 || obj_last_non_gc > 1000000) return false;
+
+                        // Check MaxObjectsNotConsideredByGC (offset 0x08) - should be 0 or small positive
+                        int32_t max_not_gc = *reinterpret_cast<int32_t*>(candidate + 0x08);
+                        if (max_not_gc < 0 || max_not_gc > 1000000) return false;
+
+                        // Check OpenForDisregardForGC (offset 0x0C) - bool, 0 or 1
+                        uint8_t open_disregard = *reinterpret_cast<uint8_t*>(candidate + 0x0C);
+                        if (open_disregard > 1) return false;
+
+                        // Check TUObjectArray.Objects (offset 0x10) - should be a valid pointer
+                        void* objects_ptr = *reinterpret_cast<void**>(candidate + 0x10);
+                        if (objects_ptr == nullptr) return false;
+                        // Pointer should be in a reasonable address range
+                        uintptr_t objects_addr = reinterpret_cast<uintptr_t>(objects_ptr);
+                        if (objects_addr < 0x10000 || objects_addr > 0x7fffffffffff) return false;
+
+                        // Check PreAllocatedObjects (offset 0x18) - 0 or valid pointer
+                        void* pre_alloc = *reinterpret_cast<void**>(candidate + 0x18);
+                        if (pre_alloc != nullptr) {
+                            uintptr_t pre_alloc_addr = reinterpret_cast<uintptr_t>(pre_alloc);
+                            if (pre_alloc_addr < 0x10000 || pre_alloc_addr > 0x7fffffffffff) return false;
+                        }
+
+                        // Check MaxElements (offset 0x20) - should be > 0 and reasonable
+                        int32_t max_elements = *reinterpret_cast<int32_t*>(candidate + 0x20);
+                        if (max_elements <= 0 || max_elements > 10000000) return false;
+
+                        // Check NumElements (offset 0x24) - should be > 0 and <= MaxElements
+                        int32_t num_elements = *reinterpret_cast<int32_t*>(candidate + 0x24);
+                        if (num_elements <= 0 || num_elements > max_elements) return false;
+
+                        // Check MaxChunks (offset 0x28) - should be > 0 and reasonable
+                        int32_t max_chunks = *reinterpret_cast<int32_t*>(candidate + 0x28);
+                        if (max_chunks <= 0 || max_chunks > 10000) return false;
+
+                        // Check NumChunks (offset 0x2C) - should be > 0 and <= MaxChunks
+                        int32_t num_chunks = *reinterpret_cast<int32_t*>(candidate + 0x2C);
+                        if (num_chunks <= 0 || num_chunks > max_chunks) return false;
+
+                        // Additional validation: NumElements should be roughly consistent with NumChunks
+                        // Each chunk holds 64*1024 = 65536 elements
+                        // So NumElements should be <= NumChunks * 65536
+                        // And NumElements should be > (NumChunks - 1) * 65536 (at least partially filled)
+                        if (num_elements > static_cast<int64_t>(num_chunks) * 65536 + 65536) return false;
+
+                        // Secondary validation: dereference Objects[0] and check if it looks like a valid FUObjectItem
+                        // FUObjectItem first field is a pointer to UObject (or SerialNumber for some versions)
+                        // On UE5.1, FUObjectItem layout: { UObject* Object, int32 Flags, int32 SerialNumber, ... }
+                        // Size is 0x18 (UEP_TotalSize from template)
+                        FUObjectItem** chunks = *reinterpret_cast<FUObjectItem***>(candidate + 0x10);
+                        if (chunks == nullptr) return false;
+                        // Try to read the first chunk pointer
+                        // This is a pointer to an array of FUObjectItem
+                        // Use volatile read to avoid SIGSEGV on invalid pointers
+                        void* first_chunk = nullptr;
+                        {
+                            // Use mprotect-safe read via /proc/self/mem fallback would be too slow
+                            // Just try to read and rely on the signal handler
+                            first_chunk = *reinterpret_cast<void* volatile*>(chunks);
+                        }
+                        if (first_chunk == nullptr) return false;
+                        uintptr_t first_chunk_addr = reinterpret_cast<uintptr_t>(first_chunk);
+                        if (first_chunk_addr < 0x10000 || first_chunk_addr > 0x7fffffffffff) return false;
+
+                        return true;
+                    };
+
+                    void* found_addr = nullptr;
+                    for (const auto& seg : writable_segments)
+                    {
+                        // Scan with 8-byte alignment (FUObjectArray is likely aligned)
+                        // Need at least 0xB8 bytes to check the full structure
+                        for (size_t offset = 0; offset + 0xB8 <= seg.size; offset += 8)
+                        {
+                            uint8_t* candidate = seg.start + offset;
+                            if (validate_fuobjectarray(candidate))
+                            {
+                                found_addr = candidate;
+                                UE4SS_DBG( "[UE4SS] Heuristic scan: FUObjectArray candidate found at %p (segment offset 0x%zx)\n", found_addr, offset);
+                                break;
+                            }
+                        }
+                        if (found_addr) break;
+                    }
+
+                    if (found_addr)
+                    {
+                        Unreal::UObjectArray::SetupGUObjectArrayAddress(found_addr);
+                        scan_result.SuccessMessage.emplace_back(STR("GUObjectArray found via heuristic memory scan"));
+                        UE4SS_DBG( "[UE4SS] Heuristic scan: GUObjectArray resolved at %p\n", found_addr);
                     }
                     else
                     {
-                        UE4SS_DBG( "[UE4SS] dlsym: GUObjectArray not found (stripped binary?)\n");
+                        UE4SS_DBG( "[UE4SS] Heuristic scan: GUObjectArray not found in any writable segment\n");
                     }
                 };
 
@@ -1495,15 +1646,16 @@ namespace RC
                 UE4SS_DBG( "[UE4SS] Linux: GUObjectArray resolved, calling LuaMod::on_program_start() and fire_program_start_for_cpp_mods()...\n");
                 TRY([&] { LuaMod::on_program_start(); });
                 TRY([&] { fire_program_start_for_cpp_mods(); });
+
+                UE4SS_DBG( "[UE4SS] Linux: calling start_lua_mods()...\n");
+                start_lua_mods();
+                UE4SS_DBG( "[UE4SS] Linux: start_lua_mods() done.\n");
             }
             else
             {
-                UE4SS_DBG( "[UE4SS] Linux: GUObjectArray not resolved, skipping LuaMod::on_program_start() and fire_program_start_for_cpp_mods() (stripped binary, no addresses)\n");
+                UE4SS_DBG( "[UE4SS] Linux: GUObjectArray not resolved, skipping LuaMod::on_program_start(), fire_program_start_for_cpp_mods(), and start_lua_mods() (stripped binary, no addresses)\n");
+                Output::send<LogLevel::Warning>(STR("WARNING: GUObjectArray not resolved (stripped binary). Lua mods will NOT be started because they require UE function addresses. Provide a UE4SS_Addresses.ini with manual addresses to enable mod functionality.\n"));
             }
-
-            UE4SS_DBG( "[UE4SS] Linux: calling start_lua_mods()...\n");
-            start_lua_mods();
-            UE4SS_DBG( "[UE4SS] Linux: start_lua_mods() done.\n");
 
             ObjectDumper::init();
             if (settings_manager.General.EnableHotReloadSystem)

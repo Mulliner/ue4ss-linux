@@ -1927,6 +1927,11 @@ Overloads:
 
                 auto function_name_no_prefix = get_function_name_without_prefix(ensure_str(lua.get_string()));
 
+                if (!Unreal::GUObjectArray)
+                {
+                    lua.throw_error("UnregisterHook failed: GUObjectArray is not resolved (stripped binary).");
+                }
+
                 Unreal::UFunction* unreal_function = Unreal::UObjectGlobals::StaticFindObject<Unreal::UFunction*>(nullptr, nullptr, function_name_no_prefix);
                 if (!unreal_function)
                 {
@@ -2476,6 +2481,11 @@ Overloads:
 
             auto mod = get_mod_ref(lua);
             auto [hook_lua, thread_ref] = make_hook_state(mod);
+
+            if (!Unreal::GUObjectArray)
+            {
+                lua.throw_error("NotifyOnNewObject failed: GUObjectArray is not resolved (stripped binary).");
+            }
 
             // Duplicate the Lua function to the top of the stack for lua_xmove and luaL_ref
             lua_pushvalue(lua.get_lua_state(), 1);
@@ -4318,6 +4328,11 @@ Overloads:
                 lua_xmove(lua.get_lua_state(), hook_lua->get_lua_state(), 1);
                 lua_post_callback_registry_index = luaL_ref(hook_lua->get_lua_state(), LUA_REGISTRYINDEX);
                 has_post_callback = true;
+            }
+
+            if (!Unreal::GUObjectArray)
+            {
+                lua.throw_error("RegisterHook failed: GUObjectArray is not resolved (stripped binary). Hooks cannot be registered without UE function addresses. Provide a UE4SS_Addresses.ini with manual addresses.");
             }
 
             Unreal::UFunction* unreal_function = Unreal::UObjectGlobals::StaticFindObject<Unreal::UFunction*>(nullptr, nullptr, function_name_no_prefix);
