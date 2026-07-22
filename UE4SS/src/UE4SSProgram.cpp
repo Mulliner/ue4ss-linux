@@ -1052,7 +1052,7 @@ namespace RC
                         // FUObjectItem first field is a pointer to UObject (or SerialNumber for some versions)
                         // On UE5.1, FUObjectItem layout: { UObject* Object, int32 Flags, int32 SerialNumber, ... }
                         // Size is 0x18 (UEP_TotalSize from template)
-                        FUObjectItem** chunks = *reinterpret_cast<FUObjectItem***>(candidate + 0x10);
+                        Unreal::FUObjectItem** chunks = *reinterpret_cast<Unreal::FUObjectItem***>(candidate + 0x10);
                         if (chunks == nullptr) return false;
                         // Try to read the first chunk pointer
                         // This is a pointer to an array of FUObjectItem
