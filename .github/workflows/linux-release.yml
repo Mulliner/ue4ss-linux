@@ -111,7 +111,7 @@ jobs:
           # Assemble changelog
           {
             if [ -s "$FEATURES_FILE" ]; then
-              echo "### ✨ Features / Neue Funktionen"
+              echo "### ✨ Features"
               cat "$FEATURES_FILE"
               echo ""
             fi
@@ -121,22 +121,22 @@ jobs:
               echo ""
             fi
             if [ -s "$REFACTORS_FILE" ]; then
-              echo "### 🔧 Refactoring & Optimierung"
+              echo "### 🔧 Refactoring & Optimization"
               cat "$REFACTORS_FILE"
               echo ""
             fi
             if [ -s "$OTHER_FILE" ]; then
-              echo "### 📝 Sonstige Änderungen"
+              echo "### 📝 Other Changes"
               cat "$OTHER_FILE"
               echo ""
             fi
             if [ ! -s "$FEATURES_FILE" ] && [ ! -s "$FIXES_FILE" ] && [ ! -s "$REFACTORS_FILE" ] && [ ! -s "$OTHER_FILE" ]; then
-              echo "Keine Änderungen seit dem letzten Release."
+              echo "No changes since the last release."
               echo ""
             fi
             echo "---"
             COMPARE_URL="https://github.com/${{ github.repository }}/compare/${PREV_TAG:-$(git rev-list --max-parents=0 HEAD)}...${{ inputs.tag_name }}"
-            echo "**Vollständige Commit-Historie:** [${PREV_TAG:-initial}...${{ inputs.tag_name }}](${COMPARE_URL})"
+            echo "**Full commit history:** [${PREV_TAG:-initial}...${{ inputs.tag_name }}](${COMPARE_URL})"
           } > "$CHANGELOG_FILE"
           
           # Write to GITHUB_OUTPUT using heredoc
@@ -201,23 +201,23 @@ jobs:
             
             ---
             
-            ### Build-Konfiguration
+            ### Build Configuration
             - Build Type: Game__Dev__Linux64
             - GUI: Enabled (GLFW3/OpenGL3)
             - Input: Disabled
             - Profilers: Disabled
             - Compiler: GCC (Ubuntu 24.04)
             
-            ### Artefakte
+            ### Artifacts
             - `libUE4SS.so` — Stripped shared library
             - `BUILD_INFO.txt` — Build metadata
             
-            ### Verwendung
+            ### Usage
             ```bash
             LD_PRELOAD=./libUE4SS.so ./YourGameBinary
             ```
             
-            ### Kompatibilität
+            ### Compatibility
             - Built on Ubuntu 24.04 (x86_64)
             - Requires: libGL, libEGL, libX11, libXrandr, libXinerama, libXcursor, libXi
             - Engine Tick Hook: Auto-detected via dlsym (or manual override in UE4SS_Addresses.ini)

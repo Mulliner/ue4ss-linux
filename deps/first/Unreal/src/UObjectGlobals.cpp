@@ -11,6 +11,10 @@
 #include <Unreal/Searcher/ObjectSearcherProfiler.hpp>
 #include <Unreal/ClassListener.hpp>
 #include <DynamicOutput/DynamicOutput.hpp>
+#ifdef __linux__
+#include <vector>
+#include <algorithm>
+#endif
 
 namespace RC::Unreal::UObjectGlobals
 {
@@ -318,6 +322,81 @@ namespace RC::Unreal::UObjectGlobals
                 {
                     return LoopAction::Continue;
                 }
+#ifdef __linux__
+                // Linux limited mode: If FName::ToString is not available (stripped binary),
+                // fall back to FName-based path comparison instead of GetFullName()+string comparison.
+                // This prevents GetAllActorsOfClass and similar lookups from failing when
+                // FName::ToString and Conv_NameToString are both unavailable.
+                if (!FName::ToStringInternal.is_ready() && !FName::Conv_NameToStringInternal)
+                {
+                    // Parse InName path parts into FNames for comparison
+                    // InName format: "/Script/Engine.Default__GameplayStatics" or "Package.Outer.Object"
+                    auto InNameStr = ToCharTypePtr(InName);
+                    std::vector<FName> InNameParts;
+                    // Split by '.' and ':'
+                    size_t start = 0;
+                    for (size_t i = 0; i < InNameStr.size(); ++i)
+                    {
+                        if (InNameStr[i] == STR('.') || InNameStr[i] == STR(':'))
+                        {
+                            if (i > start)
+                            {
+                                InNameParts.emplace_back(InNameStr.substr(start, i - start), FNAME_Find);
+                            }
+                            start = i + 1;
+                        }
+                    }
+                    if (start < InNameStr.size())
+                    {
+                        InNameParts.emplace_back(InNameStr.substr(start), FNAME_Find);
+                    }
+
+                    // Compare with object's outer chain (from outermost to innermost)
+                    // Build the object's path parts by walking the outer chain
+                    std::vector<FName> ObjectPathParts;
+                    auto PathObj = Object;
+                    while (PathObj)
+                    {
+                        ObjectPathParts.push_back(PathObj->GetNamePrivate());
+                        PathObj = PathObj->GetOuterPrivate();
+                    }
+                    // Reverse to get outermost-first order (matching InName)
+                    std::reverse(ObjectPathParts.begin(), ObjectPathParts.end());
+
+                    // Compare: InNameParts should match the suffix of ObjectPathParts
+                    if (InNameParts.size() > ObjectPathParts.size())
+                    {
+                        return LoopAction::Continue;
+                    }
+                    bool bMatch = true;
+                    for (size_t i = 0; i < InNameParts.size(); ++i)
+                    {
+                        // Compare from the end (innermost parts first)
+                        size_t inIdx = InNameParts.size() - 1 - i;
+                        size_t objIdx = ObjectPathParts.size() - 1 - i;
+                        if (!InNameParts[inIdx].Equals(ObjectPathParts[objIdx]))
+                        {
+                            bMatch = false;
+                            break;
+                        }
+                    }
+                    if (bMatch)
+                    {
+                        FoundObject = Object;
+                        return LoopAction::Break;
+                    }
+                }
+                else
+                {
+                    auto FullName = Object->GetFullName();
+                    auto ClassLessFullName = FullName.substr(FullName.find(STR(" ")) + 1);
+                    if (ToCharTypePtr(InName) == ClassLessFullName)
+                    {
+                        FoundObject = Object;
+                        return LoopAction::Break;
+                    }
+                }
+#else
                 auto FullName = Object->GetFullName();
                 auto ClassLessFullName = FullName.substr(FullName.find(STR(" ")) + 1);
                 if (ToCharTypePtr(InName) == ClassLessFullName)
@@ -325,6 +404,7 @@ namespace RC::Unreal::UObjectGlobals
                     FoundObject = Object;
                     return LoopAction::Break;
                 }
+#endif
             }
             else if (ObjectPackage || bAnyPackage)
             {

@@ -1246,10 +1246,78 @@ namespace RC
                 config.ScanOverrides.static_construct_object = [&](std::vector<SignatureContainer>&, Unreal::Signatures::ScanResult& scan_result) {
                     void* addr = try_resolve("StaticConstructObject_Internal");
                     if (!addr) addr = try_resolve("_ZL30StaticConstructObject_Internal");
+
+                    // AOB-Scan fallback for StaticConstructObject_Internal
+                    // Signature: (UClass* Class, UObject* InOuter, FName Name, EObjectFlags Flags, ...)
+                    // rdi=Class, rsi=InOuter, rdx=Name, rcx=Flags
+                    // Typical: large stack frame, saves rdi/rsi/rdx/rcx, calls multiple sub-functions
+                    // Pattern: 48 89 54 24 ?? 48 89 4C 24 ??  (mov [rsp+disp8], rdx; mov [rsp+disp8], rcx)
+                    // followed by 48 89 84 24 (mov [rsp+disp32], rax) or similar
+                    if (!addr)
+                    {
+                        UE4SS_DBG("[UE4SS] dlsym: StaticConstructObject not found, trying AOB scan...\n");
+
+                        struct ExecSegment { uint8_t* start; size_t size; };
+                        std::vector<ExecSegment> exec_segments;
+
+                        dl_iterate_phdr([](struct dl_phdr_info* info, size_t, void* data) -> int {
+                            auto* segs = static_cast<std::vector<ExecSegment>*>(data);
+                            for (int i = 0; i < info->dlpi_phnum; i++) {
+                                const ElfW(Phdr)* phdr = &info->dlpi_phdr[i];
+                                if (phdr->p_type == PT_LOAD && (phdr->p_flags & PF_X)) {
+                                    uint8_t* seg_start = reinterpret_cast<uint8_t*>(info->dlpi_addr + phdr->p_vaddr);
+                                    size_t seg_size = phdr->p_memsz;
+                                    if (seg_size > 0x1000) segs->push_back({seg_start, seg_size});
+                                }
+                            }
+                            return 0;
+                        }, &exec_segments);
+
+                        // Pattern: mov [rsp+disp8], rdx; mov [rsp+disp8], rcx (48 89 54 24 XX 48 89 4C 24)
+                        const uint8_t pattern[] = { 0x48, 0x89, 0x54, 0x24 };
+                        const size_t pattern_len = 4;
+
+                        void* found_func = nullptr;
+                        for (const auto& seg : exec_segments)
+                        {
+                            if (seg.size < 128) continue;
+                            for (size_t offset = 0; offset + 15 <= seg.size; offset++)
+                            {
+                                if (memcmp(seg.start + offset, pattern, pattern_len) != 0) continue;
+                                // Check for mov [rsp+disp8], rcx at offset+5
+                                if (memcmp(seg.start + offset + 5, "\x48\x89\x4C\x24", 4) != 0) continue;
+
+                                // Scan backwards for function start
+                                uint8_t* pattern_pos = seg.start + offset;
+                                uint8_t* func_start = nullptr;
+                                for (int back = 0; back < 80 && pattern_pos - back > seg.start; back++)
+                                {
+                                    uint8_t* candidate = pattern_pos - back;
+                                    if ((reinterpret_cast<uintptr_t>(candidate) % 16 == 0) && *candidate == 0x55)
+                                    { func_start = candidate; break; }
+                                    if ((reinterpret_cast<uintptr_t>(candidate) % 16 == 0) &&
+                                        candidate[0] == 0x48 && candidate[1] == 0x81 && candidate[2] == 0xEC)
+                                    { func_start = candidate; break; }
+                                    if (back > 0 && candidate[0] == 0xCC && candidate[1] != 0xCC)
+                                    { func_start = candidate + 1; break; }
+                                }
+                                if (!func_start) func_start = pattern_pos;
+
+                                found_func = func_start;
+                                UE4SS_DBG("[UE4SS] AOB scan: StaticConstructObject candidate at %p\n", found_func);
+                                break;
+                            }
+                            if (found_func) break;
+                        }
+
+                        if (found_func) addr = found_func;
+                        else UE4SS_DBG("[UE4SS] AOB scan: StaticConstructObject not found\n");
+                    }
+
                     if (addr)
                     {
                         Unreal::UObjectGlobals::SetupStaticConstructObjectInternalAddress(addr);
-                        scan_result.SuccessMessage.emplace_back(STR("StaticConstructObject found via dlsym"));
+                        scan_result.SuccessMessage.emplace_back(STR("StaticConstructObject found via dlsym/AOB scan"));
                     }
                     else
                     {
@@ -1257,13 +1325,85 @@ namespace RC
                     }
                 };
 
-                // Override FMemory::Free scan
+                // Override FMemory::Free / GMalloc scan
+                // GMalloc is a pointer-to-pointer (FMalloc**): a global variable in .data/.bss
+                // that points to a single FMalloc* (the actual allocator instance).
+                // Heuristic: find a writable pointer that points to another writable pointer
+                // where the second pointer is in a writable segment (the FMalloc instance).
                 config.ScanOverrides.fmemory_free = [&](std::vector<SignatureContainer>&, Unreal::Signatures::ScanResult& scan_result) {
                     void* addr = try_resolve("GMalloc");
+
+                    if (!addr)
+                    {
+                        UE4SS_DBG("[UE4SS] dlsym: GMalloc not found, trying heuristic scan...\n");
+
+                        struct WritableSeg { uint8_t* start; size_t size; };
+                        std::vector<WritableSeg> writable_segments;
+
+                        dl_iterate_phdr([](struct dl_phdr_info* info, size_t, void* data) -> int {
+                            auto* segs = static_cast<std::vector<WritableSeg>*>(data);
+                            for (int i = 0; i < info->dlpi_phnum; i++) {
+                                const ElfW(Phdr)* phdr = &info->dlpi_phdr[i];
+                                if (phdr->p_type == PT_LOAD && (phdr->p_flags & PF_W)) {
+                                    uint8_t* seg_start = reinterpret_cast<uint8_t*>(info->dlpi_addr + phdr->p_vaddr);
+                                    size_t seg_size = phdr->p_memsz;
+                                    if (seg_size > 0x100) segs->push_back({seg_start, seg_size});
+                                }
+                            }
+                            return 0;
+                        }, &writable_segments);
+
+                        // Build a set of writable address ranges for validation
+                        struct AddrRange { uintptr_t start; uintptr_t end; };
+                        std::vector<AddrRange> writable_ranges;
+                        for (const auto& seg : writable_segments)
+                        {
+                            writable_ranges.push_back({reinterpret_cast<uintptr_t>(seg.start),
+                                                       reinterpret_cast<uintptr_t>(seg.start) + seg.size});
+                        }
+
+                        auto is_writable = [&writable_ranges](uintptr_t ptr) -> bool {
+                            for (const auto& range : writable_ranges) {
+                                if (ptr >= range.start && ptr < range.end) return true;
+                            }
+                            return false;
+                        };
+
+                        // GMalloc is FMalloc** — a pointer in .data/.bss pointing to a FMalloc* in .data/.bss
+                        // Scan for: ptr -> ptr -> (writable segment)
+                        // The first pointer is GMalloc itself, the second is the FMalloc instance
+                        void* found_addr = nullptr;
+                        for (const auto& seg : writable_segments)
+                        {
+                            for (size_t offset = 0; offset + 8 <= seg.size; offset += 8)
+                            {
+                                uintptr_t first_ptr = *reinterpret_cast<uintptr_t*>(seg.start + offset);
+                                if (first_ptr < 0x10000 || first_ptr > 0x7fffffffffff) continue;
+                                if (!is_writable(first_ptr)) continue;
+
+                                // Dereference first_ptr to get the FMalloc instance pointer
+                                uintptr_t second_ptr = *reinterpret_cast<uintptr_t*>(first_ptr);
+                                if (second_ptr < 0x10000 || second_ptr > 0x7fffffffffff) continue;
+                                if (!is_writable(second_ptr)) continue;
+
+                                // Candidate found — GMalloc is at seg.start + offset
+                                // But we need to filter false positives. GMalloc typically has
+                                // a recognizable vtable nearby. For now, accept the first match.
+                                found_addr = seg.start + offset;
+                                UE4SS_DBG("[UE4SS] Heuristic scan: GMalloc candidate at %p (-> %p -> %p)\n", found_addr, (void*)first_ptr, (void*)second_ptr);
+                                break;
+                            }
+                            if (found_addr) break;
+                        }
+
+                        if (found_addr) addr = found_addr;
+                        else UE4SS_DBG("[UE4SS] Heuristic scan: GMalloc not found\n");
+                    }
+
                     if (addr)
                     {
                         Unreal::GMalloc = std::bit_cast<Unreal::FMalloc**>(addr);
-                        scan_result.SuccessMessage.emplace_back(STR("GMalloc found via dlsym"));
+                        scan_result.SuccessMessage.emplace_back(STR("GMalloc found via dlsym/heuristic scan"));
                     }
                     else
                     {
@@ -1781,10 +1921,95 @@ namespace RC
                     void* addr = try_resolve("UObject::CallFunctionByNameWithArguments");
                     if (!addr) addr = try_resolve("_ZN6UObject27CallFunctionByNameWithArgumentsEPKTRK18FOutputDeviceP6UObjectb");
                     if (!addr) addr = try_resolve("CallFunctionByNameWithArguments");
+
+                    // AOB-Scan fallback for CallFunctionByNameWithArguments
+                    // Signature: (const TCHAR* Str, FOutputDevice& Ar, UObject* Executor, bool bForceCall)
+                    // rdi=Str, rsi=Ar, rdx=Executor, rcx=bForceCall
+                    // Typical prologue: save Str (rdi) to rbx, move Executor (rdx) to rdi for sub-call
+                    //   48 89 FB          mov rbx, rdi    (save Str)
+                    //   48 89 FA          mov rdx, rdi    (wrong direction?) 
+                    // Actually: mov rbx, rdi; mov rdi, rdx (pass Executor as first arg)
+                    //   48 89 FB 48 89 FA  — mov rbx, rdi; mov rdx, rdi (no, rdx->rdi)
+                    // More likely: 48 89 FB 48 89 D7 — mov rbx, rdi; mov rdi, rdx
+                    if (!addr)
+                    {
+                        UE4SS_DBG("[UE4SS] dlsym: CallFunctionByNameWithArguments not found, trying AOB scan...\n");
+
+                        struct ExecSegment { uint8_t* start; size_t size; };
+                        std::vector<ExecSegment> exec_segments;
+
+                        dl_iterate_phdr([](struct dl_phdr_info* info, size_t, void* data) -> int {
+                            auto* segs = static_cast<std::vector<ExecSegment>*>(data);
+                            for (int i = 0; i < info->dlpi_phnum; i++) {
+                                const ElfW(Phdr)* phdr = &info->dlpi_phdr[i];
+                                if (phdr->p_type == PT_LOAD && (phdr->p_flags & PF_X)) {
+                                    uint8_t* seg_start = reinterpret_cast<uint8_t*>(info->dlpi_addr + phdr->p_vaddr);
+                                    size_t seg_size = phdr->p_memsz;
+                                    if (seg_size > 0x1000) segs->push_back({seg_start, seg_size});
+                                }
+                            }
+                            return 0;
+                        }, &exec_segments);
+
+                        // Pattern: mov rbx, rdi; mov rdi, rdx (48 89 FB 48 89 D7)
+                        // This saves Str (rdi) in rbx and passes Executor (rdx) as first arg to a sub-call
+                        const uint8_t pattern[] = { 0x48, 0x89, 0xFB, 0x48, 0x89, 0xD7 };
+                        const size_t pattern_len = sizeof(pattern);
+
+                        void* found_func = nullptr;
+                        for (const auto& seg : exec_segments)
+                        {
+                            if (seg.size < pattern_len + 32) continue;
+                            for (size_t offset = 0; offset + pattern_len + 16 <= seg.size; offset++)
+                            {
+                                if (memcmp(seg.start + offset, pattern, pattern_len) != 0) continue;
+
+                                // Check for a call instruction within 16 bytes after the pattern
+                                bool has_call = false;
+                                for (size_t c = pattern_len; c < pattern_len + 16 && offset + c + 5 <= seg.size; c++)
+                                {
+                                    if (seg.start[offset + c] == 0xE8)
+                                    {
+                                        int32_t rel32 = *reinterpret_cast<int32_t*>(seg.start + offset + c + 1);
+                                        uint8_t* call_target = seg.start + offset + c + 5 + rel32;
+                                        uintptr_t call_target_addr = reinterpret_cast<uintptr_t>(call_target);
+                                        if (call_target_addr >= 0x10000 && call_target_addr <= 0x7fffffffffff)
+                                        { has_call = true; break; }
+                                    }
+                                }
+                                if (!has_call) continue;
+
+                                // Scan backwards for function start
+                                uint8_t* pattern_pos = seg.start + offset;
+                                uint8_t* func_start = nullptr;
+                                for (int back = 0; back < 48 && pattern_pos - back > seg.start; back++)
+                                {
+                                    uint8_t* candidate = pattern_pos - back;
+                                    if ((reinterpret_cast<uintptr_t>(candidate) % 16 == 0) && *candidate == 0x55)
+                                    { func_start = candidate; break; }
+                                    if ((reinterpret_cast<uintptr_t>(candidate) % 16 == 0) &&
+                                        candidate[0] == 0x48 && (candidate[1] == 0x81 || candidate[1] == 0x83) && candidate[2] == 0xEC)
+                                    { func_start = candidate; break; }
+                                    if (back > 0 && candidate[0] == 0xCC && candidate[1] != 0xCC)
+                                    { func_start = candidate + 1; break; }
+                                }
+                                if (!func_start) func_start = pattern_pos;
+
+                                found_func = func_start;
+                                UE4SS_DBG("[UE4SS] AOB scan: CallFunctionByNameWithArguments candidate at %p\n", found_func);
+                                break;
+                            }
+                            if (found_func) break;
+                        }
+
+                        if (found_func) addr = found_func;
+                        else UE4SS_DBG("[UE4SS] AOB scan: CallFunctionByNameWithArguments not found\n");
+                    }
+
                     if (addr)
                     {
                         Unreal::UObject::CallFunctionByNameWithArgumentsInternal.assign_address(addr);
-                        scan_result.SuccessMessage.emplace_back(STR("CallFunctionByNameWithArguments found via dlsym"));
+                        scan_result.SuccessMessage.emplace_back(STR("CallFunctionByNameWithArguments found via dlsym/AOB scan"));
                     }
                     else
                     {
