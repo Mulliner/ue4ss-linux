@@ -76,57 +76,69 @@ jobs:
             COMMITS=$(git log --pretty=format:"%s" -50 --no-merges 2>/dev/null || echo "")
           fi
           
-          # Categorize commits
-          FEATURES=""
-          FIXES=""
-          REFACTORS=""
-          OTHER=""
+          # Build changelog in a temp file
+          CHANGELOG_FILE=$(mktemp)
+          
+          # Categorize commits and write to temp file
+          FEATURES_FILE=$(mktemp)
+          FIXES_FILE=$(mktemp)
+          REFACTORS_FILE=$(mktemp)
+          OTHER_FILE=$(mktemp)
           
           while IFS= read -r line; do
             [ -z "$line" ] && continue
             lower=$(echo "$line" | tr '[:upper:]' '[:lower:]')
             if echo "$lower" | grep -qE '^(feat|feature|add|implement)'; then
-              FEATURES="${FEATURES}- ${line}\n"
+              echo "- ${line}" >> "$FEATURES_FILE"
             elif echo "$lower" | grep -qE '^(fix|bugfix|hotfix)'; then
-              FIXES="${FIXES}- ${line}\n"
+              echo "- ${line}" >> "$FIXES_FILE"
             elif echo "$lower" | grep -qE '^(refactor|cleanup|optim|perf)'; then
-              REFACTORS="${REFACTORS}- ${line}\n"
+              echo "- ${line}" >> "$REFACTORS_FILE"
             else
-              OTHER="${OTHER}- ${line}\n"
+              echo "- ${line}" >> "$OTHER_FILE"
             fi
           done <<< "$COMMITS"
           
-          # Build changelog output
+          # Assemble changelog
           {
-            echo "CHANGELOG<<EOF"
-            if [ -n "$FEATURES" ]; then
+            if [ -s "$FEATURES_FILE" ]; then
               echo "### ✨ Features / Neue Funktionen"
-              printf "$FEATURES"
+              cat "$FEATURES_FILE"
               echo ""
             fi
-            if [ -n "$FIXES" ]; then
+            if [ -s "$FIXES_FILE" ]; then
               echo "### 🐛 Bug Fixes"
-              printf "$FIXES"
+              cat "$FIXES_FILE"
               echo ""
             fi
-            if [ -n "$REFACTORS" ]; then
+            if [ -s "$REFACTORS_FILE" ]; then
               echo "### 🔧 Refactoring & Optimierung"
-              printf "$REFACTORS"
+              cat "$REFACTORS_FILE"
               echo ""
             fi
-            if [ -n "$OTHER" ]; then
+            if [ -s "$OTHER_FILE" ]; then
               echo "### 📝 Sonstige Änderungen"
-              printf "$OTHER"
+              cat "$OTHER_FILE"
               echo ""
             fi
-            if [ -z "$FEATURES" ] && [ -z "$FIXES" ] && [ -z "$REFACTORS" ] && [ -z "$OTHER" ]; then
+            if [ ! -s "$FEATURES_FILE" ] && [ ! -s "$FIXES_FILE" ] && [ ! -s "$REFACTORS_FILE" ] && [ ! -s "$OTHER_FILE" ]; then
               echo "Keine Änderungen seit dem letzten Release."
               echo ""
             fi
             echo "---"
-            echo "**Vollständige Commit-Historie:** [${PREV_TAG:-initial}...${{ inputs.tag_name }}](https://github.com/${{ github.repository }}/compare/${PREV_TAG:-$(git rev-list --max-parents=0 HEAD)}...${{ inputs.tag_name }})"
-            echo "EOF"
+            COMPARE_URL="https://github.com/${{ github.repository }}/compare/${PREV_TAG:-$(git rev-list --max-parents=0 HEAD)}...${{ inputs.tag_name }}"
+            echo "**Vollständige Commit-Historie:** [${PREV_TAG:-initial}...${{ inputs.tag_name }}](${COMPARE_URL})"
+          } > "$CHANGELOG_FILE"
+          
+          # Write to GITHUB_OUTPUT using heredoc
+          {
+            echo "CHANGELOG<<CHANGELOG_EOF"
+            cat "$CHANGELOG_FILE"
+            echo "CHANGELOG_EOF"
           } >> "$GITHUB_OUTPUT"
+          
+          # Cleanup
+          rm -f "$FEATURES_FILE" "$FIXES_FILE" "$REFACTORS_FILE" "$OTHER_FILE" "$CHANGELOG_FILE"
           
       - name: Strip and prepare artifacts
         run: |
