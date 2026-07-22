@@ -1104,6 +1104,8 @@ namespace RC
                 config.ScanOverrides.fname_to_string = [&](std::vector<SignatureContainer>&, Unreal::Signatures::ScanResult& scan_result) {
                     void* addr = try_resolve("FName::ToString");
                     if (!addr) addr = try_resolve("_ZN5FName8ToStringEv");
+                    // Try const variant
+                    if (!addr) addr = try_resolve("_ZNK5FName8ToStringEv");
                     if (addr)
                     {
                         Unreal::FName::ToStringInternal.assign_address(addr);
@@ -1112,6 +1114,22 @@ namespace RC
                     else
                     {
                         UE4SS_DBG( "[UE4SS] dlsym: FName::ToString not found (stripped binary?)\n");
+                    }
+                };
+
+                // Override ProcessEvent scan — needed for hooking UObject::ProcessEvent
+                config.ScanOverrides.process_event = [&](std::vector<SignatureContainer>&, Unreal::Signatures::ScanResult& scan_result) {
+                    void* addr = try_resolve("UObject::ProcessEvent");
+                    if (!addr) addr = try_resolve("_ZN6UObject12ProcessEventEP8UFunctionPv");
+                    if (!addr) addr = try_resolve("ProcessEvent");
+                    if (addr)
+                    {
+                        Unreal::UObject::ProcessEventInternal.assign_address(addr);
+                        scan_result.SuccessMessage.emplace_back(STR("ProcessEvent found via dlsym"));
+                    }
+                    else
+                    {
+                        UE4SS_DBG( "[UE4SS] dlsym: ProcessEvent not found (stripped binary?)\n");
                     }
                 };
 
@@ -1162,7 +1180,23 @@ namespace RC
                 // Override FName constructor scan
                 config.ScanOverrides.fname_constructor = [&](std::vector<SignatureContainer>&, Unreal::Signatures::ScanResult& scan_result) {
                     void* addr = try_resolve("FName::FName");
+                    // Try default constructor (no params) — not the one we need but might be useful
                     if (!addr) addr = try_resolve("_ZN5FNameC1Ev");
+                    // Try FName(const CharType*, EFindName) — the constructor we actually need
+                    // char16_t* variant (UE5 uses CharType = char16_t on Linux)
+                    if (!addr) addr = try_resolve("_ZN5FNameC1EPKDsRK10EFindName");
+                    if (!addr) addr = try_resolve("_ZN5FNameC2EPKDsRK10EFindName");
+                    // wchar_t* variant
+                    if (!addr) addr = try_resolve("_ZN5FNameC1EPKwRK10EFindName");
+                    if (!addr) addr = try_resolve("_ZN5FNameC2EPKwRK10EFindName");
+                    // char8_t* variant (some UE versions)
+                    if (!addr) addr = try_resolve("_ZN5FNameC1EPKhRK10EFindName");
+                    if (!addr) addr = try_resolve("_ZN5FNameC2EPKhRK10EFindName");
+                    // Without EFindName param
+                    if (!addr) addr = try_resolve("_ZN5FNameC1EPKDs");
+                    if (!addr) addr = try_resolve("_ZN5FNameC2EPKDs");
+                    // C2 base constructor variants
+                    if (!addr) addr = try_resolve("_ZN5FNameC2Ev");
                     if (addr)
                     {
                         Unreal::FName::ConstructorInternal.assign_address(addr);

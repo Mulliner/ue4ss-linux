@@ -463,6 +463,9 @@ namespace RC::Unreal::UnrealInitializer
         config.gnatives = !UnrealConfig.ScanOverrides.gnatives;
         config.console_manager_singleton = !UnrealConfig.ScanOverrides.console_manager_singleton;
         config.gameengine_tick = !UnrealConfig.ScanOverrides.gameengine_tick;
+        // ftext_fstring has no ScanOverride field, so we explicitly set it to false
+        // to ensure ps_scan is skipped when all other overrides are set
+        config.ftext_fstring = false;
 
         PsCtx ctx {
             [](CharType* msg){ Output::send<LogLevel::Default>(STR("[PS] {}\n"), msg); },
@@ -775,32 +778,76 @@ namespace RC::Unreal::UnrealInitializer
 
         // Delay until enough elements have been constructed by the engine to the point where we know we can start constructing FNames.
         Output::send(STR("Waiting for object construction...\n"));
-        while (UObjectArray::GetNumElements() < 10000)
         {
+            auto wait_start = std::chrono::steady_clock::now();
+            while (UObjectArray::GetNumElements() < 10000)
+            {
+                if (std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - wait_start).count() > 60)
+                {
+                    Output::send<LogLevel::Warning>(STR("Timeout waiting for object construction ({} elements). Continuing with limited FName support.\n"), UObjectArray::GetNumElements());
+                    break;
+                }
+            }
         }
         // We're assuming that KismetStringLibrary, KismetStringLibrary.Conv_NameToString, and the KismetStringLibrary CDO exists.
         // We will lock here forever if that's not the case.
         // Consider adding a limit to how long we can wait.
         Output::send(STR("Locating KismetSystemLibrary...\n"));
         UClass* KismetStringLibrary{};
-        while (!KismetStringLibrary)
         {
-            KismetStringLibrary = static_cast<UClass*>(UObjectGlobals::StaticFindObject_InternalNoToStringFromStrings({STR("/Script/Engine"), STR("KismetStringLibrary")}));
+            auto wait_start = std::chrono::steady_clock::now();
+            while (!KismetStringLibrary)
+            {
+                KismetStringLibrary = static_cast<UClass*>(UObjectGlobals::StaticFindObject_InternalNoToStringFromStrings({STR("/Script/Engine"), STR("KismetStringLibrary")}));
+                if (!KismetStringLibrary)
+                {
+                    if (std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - wait_start).count() > 30)
+                    {
+                        Output::send<LogLevel::Warning>(STR("Timeout locating KismetStringLibrary. FName::ToString via Conv_NameToString will not be available.\n"));
+                        break;
+                    }
+                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                }
+            }
         }
         // For some games, it's found in GUObjectArray, and in other games, it's found in the function linked list.
         Output::send(STR("Locating KismetSystemLibrary:Conv_NameToString...\n"));
-        while (!FName::Conv_NameToStringInternal)
         {
-            FName::Conv_NameToStringInternal = KismetStringLibrary->GetFunctionByName(FName(STR("Conv_NameToString"), FNAME_Find));
-            if (!FName::Conv_NameToStringInternal)
+            auto wait_start = std::chrono::steady_clock::now();
+            while (!FName::Conv_NameToStringInternal && KismetStringLibrary)
             {
-                FName::Conv_NameToStringInternal = static_cast<UFunction*>(UObjectGlobals::StaticFindObject_InternalNoToStringFromStrings({STR("/Script/Engine"), STR("KismetStringLibrary"), STR("Conv_NameToString")}));
+                FName::Conv_NameToStringInternal = KismetStringLibrary->GetFunctionByName(FName(STR("Conv_NameToString"), FNAME_Find));
+                if (!FName::Conv_NameToStringInternal)
+                {
+                    FName::Conv_NameToStringInternal = static_cast<UFunction*>(UObjectGlobals::StaticFindObject_InternalNoToStringFromStrings({STR("/Script/Engine"), STR("KismetStringLibrary"), STR("Conv_NameToString")}));
+                }
+                if (!FName::Conv_NameToStringInternal)
+                {
+                    if (std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - wait_start).count() > 30)
+                    {
+                        Output::send<LogLevel::Warning>(STR("Timeout locating Conv_NameToString. FName::ToString will use fallback.\n"));
+                        break;
+                    }
+                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                }
             }
         }
         Output::send(STR("Locating KismetSystemLibrary CDO...\n"));
-        while (!FName::KismetStringLibraryCDO)
         {
-            FName::KismetStringLibraryCDO = KismetStringLibrary->GetClassDefaultObject();
+            auto wait_start = std::chrono::steady_clock::now();
+            while (!FName::KismetStringLibraryCDO && KismetStringLibrary)
+            {
+                FName::KismetStringLibraryCDO = KismetStringLibrary->GetClassDefaultObject();
+                if (!FName::KismetStringLibraryCDO)
+                {
+                    if (std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - wait_start).count() > 30)
+                    {
+                        Output::send<LogLevel::Warning>(STR("Timeout locating KismetStringLibrary CDO. Continuing without it.\n"));
+                        break;
+                    }
+                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                }
+            }
         }
 
         // Objects that are required to exist before we can continue
@@ -876,19 +923,19 @@ namespace RC::Unreal::UnrealInitializer
         auto* Object = UObjectGlobals::StaticFindObject_InternalSlow(nullptr, nullptr, STR("/Script/CoreUObject.Default__Object"));
         if (!Object)
         {
-            throw std::runtime_error{"Post-initialization: Was unable to find 'CoreUObject.Default__Object' to use to retrieve the address of ProcessEvent"};
+            Output::send<LogLevel::Warning>(STR("Post-initialization: Was unable to find 'CoreUObject.Default__Object' to use to retrieve the address of ProcessEvent. ProcessEvent hook will not be available.\n"));
         }
 
         auto* Struct = UObjectGlobals::StaticFindObject_InternalSlow(nullptr, nullptr, STR("/Script/CoreUObject.Default__Struct"));
         if (!Struct)
         {
-            throw std::runtime_error{"Post-initialization: Was unable to find 'CoreUObject.Default__Struct' to use to retrieve the address of SetSuperStruct"};
+            Output::send<LogLevel::Warning>(STR("Post-initialization: Was unable to find 'CoreUObject.Default__Struct' to use to retrieve the address of SetSuperStruct. UStruct::Link hook will not be available.\n"));
         }
 
         auto* GameEngine = GetInstanceFromClass(STR("GameEngine"), STR("/Script/Engine.Default__GameEngine"));
         if (!GameEngine)
         {
-            throw std::runtime_error{"Post-initialization: Was unable to find 'Engine.Default__GameEngine' to use to retrieve the address of LoadMap"};
+            Output::send<LogLevel::Warning>(STR("Post-initialization: Was unable to find 'Engine.Default__GameEngine' to use to retrieve the address of LoadMap. LoadMap and EngineTick hooks will not be available.\n"));
         }
 
         // Some UE versions don't use GameModeBase (i.e: 4.13), so we must check both.
@@ -899,14 +946,14 @@ namespace RC::Unreal::UnrealInitializer
             GameMode = GetInstanceFromClass(STR("GameMode"), STR("/Script/Engine.Default__GameMode"));
             if (!GameMode)
             {
-                throw std::runtime_error{"Post-initialization: Was unable to find 'Engine.Default__GameModeBase' or 'Engine.Default__GameMode' to use to retrieve the address of InitGameState"};
+                Output::send<LogLevel::Warning>(STR("Post-initialization: Was unable to find 'Engine.Default__GameModeBase' or 'Engine.Default__GameMode' to use to retrieve the address of InitGameState. InitGameState hook will not be available.\n"));
             }
         }
 
         auto* Actor = UObjectGlobals::StaticFindObject_InternalSlow(nullptr, nullptr, STR("/Script/Engine.Default__Actor"));
         if (!Actor)
         {
-            throw std::runtime_error{"Post-initialization: Was unable to find 'Engine.Default__Actor' to use to retrieve the address of BeginPlay"};
+            Output::send<LogLevel::Warning>(STR("Post-initialization: Was unable to find 'Engine.Default__Actor' to use to retrieve the address of BeginPlay. BeginPlay and EndPlay hooks will not be available.\n"));
         }
 
         auto* GameViewportClient = GetInstanceFromClass(STR("GameViewportClient"), STR("/Script/Engine.Default__GameViewportClient"));
@@ -916,7 +963,7 @@ namespace RC::Unreal::UnrealInitializer
             StaticStorage::GlobalConfig.bHookGameViewportClientTick = false;
         }
 
-        if (UnrealConfig.bHookLoadMap)
+        if (UnrealConfig.bHookLoadMap && GameEngine)
         {
             if (auto func_address = OPTIONAL_GET_ADDRESS_OF_UNREAL_VIRTUAL(UEngine, LoadMap, GameEngine); func_address)
             {
@@ -924,7 +971,7 @@ namespace RC::Unreal::UnrealInitializer
                 UEngine::LoadMapInternal.assign_address(func_address);
             }
         }
-        if (UnrealConfig.bHookEngineTick)
+        if (UnrealConfig.bHookEngineTick && GameEngine)
         {
             auto vtable_address = OPTIONAL_GET_ADDRESS_OF_UNREAL_VIRTUAL(UEngine, Tick, GameEngine);
             auto scan_address = UEngine::TickInternal.get_function_address();
@@ -993,7 +1040,7 @@ namespace RC::Unreal::UnrealInitializer
             }
             Hook::RegisterEngineTickPreCallback(HookedEngineTick, {true, false, STR("UE4SS"), STR("GameThreadInitializer")});
         }
-        if (UnrealConfig.bHookInitGameState)
+        if (UnrealConfig.bHookInitGameState && GameMode)
         {
             if (auto func_address = OPTIONAL_GET_ADDRESS_OF_UNREAL_VIRTUAL(AGameModeBase, InitGameState, GameMode); func_address)
             {
@@ -1001,7 +1048,7 @@ namespace RC::Unreal::UnrealInitializer
                 AGameModeBase::InitGameStateInternal.assign_address(func_address);
             }
         }
-        if (UnrealConfig.bHookBeginPlay)
+        if (UnrealConfig.bHookBeginPlay && Actor)
         {
             if (auto func_address = OPTIONAL_GET_ADDRESS_OF_UNREAL_VIRTUAL(AActor, BeginPlay, Actor); func_address)
             {
@@ -1009,7 +1056,7 @@ namespace RC::Unreal::UnrealInitializer
                 AActor::BeginPlayInternal.assign_address(func_address);
             }
         }
-        if (UnrealConfig.bHookEndPlay)
+        if (UnrealConfig.bHookEndPlay && Actor)
         {
             if (auto func_address = OPTIONAL_GET_ADDRESS_OF_UNREAL_VIRTUAL(AActor, EndPlay, Actor); func_address)
             {
@@ -1017,7 +1064,7 @@ namespace RC::Unreal::UnrealInitializer
                 AActor::EndPlayInternal.assign_address(func_address);
             }
         }
-        if (UnrealConfig.bHookAActorTick)
+        if (UnrealConfig.bHookAActorTick && Actor)
         {
             if (auto func_address = OPTIONAL_GET_ADDRESS_OF_UNREAL_VIRTUAL(AActor, Tick, Actor); func_address)
             {
@@ -1025,7 +1072,7 @@ namespace RC::Unreal::UnrealInitializer
                 AActor::TickInternal.assign_address(func_address);
             }
         }
-        if (UnrealConfig.bHookGameViewportClientTick)
+        if (UnrealConfig.bHookGameViewportClientTick && GameViewportClient)
         {
             if (auto func_address = OPTIONAL_GET_ADDRESS_OF_UNREAL_VIRTUAL(UGameViewportClient, Tick, GameViewportClient); func_address)
             {
@@ -1033,7 +1080,7 @@ namespace RC::Unreal::UnrealInitializer
                 UGameViewportClient::TickInternal.assign_address(func_address);
             }
         }
-        if (UnrealConfig.bHookUObjectProcessEvent)
+        if (UnrealConfig.bHookUObjectProcessEvent && Object)
         {
             if (auto func_address = OPTIONAL_GET_ADDRESS_OF_UNREAL_VIRTUAL(UObject, ProcessEvent, Object); func_address)
             {
@@ -1041,7 +1088,7 @@ namespace RC::Unreal::UnrealInitializer
                 UObject::ProcessEventInternal.assign_address(func_address);
             }
         }
-        if (UnrealConfig.bHookProcessConsoleExec)
+        if (UnrealConfig.bHookProcessConsoleExec && Object)
         {
             if (auto func_address = GET_ADDRESS_OF_UNREAL_VIRTUAL(UObject, ProcessConsoleExec, Object); func_address)
             {
@@ -1049,7 +1096,7 @@ namespace RC::Unreal::UnrealInitializer
                 UObject::ProcessConsoleExecInternal.assign_address(func_address);
             }
         }
-        if (UnrealConfig.bHookUStructLink)
+        if (UnrealConfig.bHookUStructLink && Struct)
         {
             if (auto func_address = GET_ADDRESS_OF_UNREAL_VIRTUAL(UStruct, Link, Struct); func_address)
             {
@@ -1063,18 +1110,17 @@ namespace RC::Unreal::UnrealInitializer
         Output::send(STR("Constructed {} of {} objects\n"), Hook::StaticStorage::NumRequiredObjectsConstructed, Hook::StaticStorage::RequiredObjectsForInit.size());
         if (!Hook::StaticStorage::bAllRequiredObjectsConstructed)
         {
-            Output::send(STR("Fatal error! The following objects were never constructed:\n"));
+            Output::send<LogLevel::Warning>(STR("Warning: The following required objects were never constructed (continuing in limited mode):\n"));
             for (const auto& RequiredObject : Hook::StaticStorage::RequiredObjectsForInit)
             {
                 if (RequiredObject.ObjectConstructed) { continue; }
-                Output::send(STR("{}\n"), RequiredObject.ObjectNameParts.back().ToString());
+                Output::send<LogLevel::Warning>(STR("  MISSING: {}\n"), RequiredObject.ObjectNameParts.back().ToString());
             }
-            throw std::runtime_error{""};
         }
 
         if (!TypeChecker::store_all_object_types())
         {
-            throw std::runtime_error{"TypeChecker: Was unable to find some or all of the required core objects"};
+            Output::send<LogLevel::Warning>(STR("Warning: TypeChecker was unable to find some or all of the required core objects (continuing in limited mode)\n"));
         }
 
         if (UnrealConfig.bHookProcessInternal || UnrealConfig.bHookProcessLocalScriptFunction)
@@ -1082,8 +1128,10 @@ namespace RC::Unreal::UnrealInitializer
             auto ExecuteUbergraphFunction = UObjectGlobals::StaticFindObject<UFunction*>(nullptr, nullptr, STR("/Script/CoreUObject.Object:ExecuteUbergraph"));
             if (!ExecuteUbergraphFunction)
             {
-                throw std::runtime_error{"Was unable to find locate ProcessInternal because '/Script/CoreUObject.Object:ExecuteUbergraph' wasn't found in GUObjectArray"};
+                Output::send<LogLevel::Warning>(STR("Warning: Was unable to locate ProcessInternal because '/Script/CoreUObject.Object:ExecuteUbergraph' wasn't found in GUObjectArray. ProcessInternal hook will not be available.\n"));
             }
+            else
+            {
             auto ProcessInternal = ExecuteUbergraphFunction->GetFuncPtr();
             ProcessInternal = std::bit_cast<decltype(ProcessInternal)>(RESOLVE_JMP(std::bit_cast<void*>(ProcessInternal)));
             // Only assign ProcessInternalInternal if no override exists, allowing Lua override to take precedence
@@ -1138,6 +1186,7 @@ namespace RC::Unreal::UnrealInitializer
 #endif
                 }
             }
+            } // end else (ExecuteUbergraphFunction found)
         }
 
         Output::send<LogLevel::Verbose>(STR("UnrealConfig.FExecVTableOffsetInLocalPlayer: {:X}\n"), UnrealConfig.FExecVTableOffsetInLocalPlayer);
