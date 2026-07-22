@@ -1434,12 +1434,109 @@ namespace RC
                 };
 
                 // Override GNatives scan
+                // GNatives is a global array of function pointers (FNativeFuncPtr*),
+                // NOT a function itself. It lives in .data/.bss (writable segment).
+                // Each entry is a pointer to a native function in the executable segment.
+                // Heuristic: find a contiguous array of at least 64 pointers where all point
+                // into executable PT_LOAD segments.
                 config.ScanOverrides.gnatives = [&](std::vector<SignatureContainer>&, Unreal::Signatures::ScanResult& scan_result) {
                     void* addr = try_resolve("GNatives");
+
+                    if (!addr)
+                    {
+                        UE4SS_DBG("[UE4SS] dlsym: GNatives not found, trying heuristic scan...\n");
+
+                        // Collect executable segment ranges for validation
+                        struct ExecRange { uintptr_t start; uintptr_t end; };
+                        std::vector<ExecRange> exec_ranges;
+
+                        // Also collect writable segments for scanning
+                        struct WritableSeg { uint8_t* start; size_t size; };
+                        std::vector<WritableSeg> writable_segments;
+
+                        struct ScanData {
+                            std::vector<ExecRange>* exec_ranges;
+                            std::vector<WritableSeg>* writable_segments;
+                        };
+                        ScanData scan_data{&exec_ranges, &writable_segments};
+
+                        dl_iterate_phdr([](struct dl_phdr_info* info, size_t, void* data) -> int {
+                            auto* sd = static_cast<ScanData*>(data);
+                            for (int i = 0; i < info->dlpi_phnum; i++) {
+                                const ElfW(Phdr)* phdr = &info->dlpi_phdr[i];
+                                if (phdr->p_type == PT_LOAD) {
+                                    uintptr_t seg_start = info->dlpi_addr + phdr->p_vaddr;
+                                    uintptr_t seg_end = seg_start + phdr->p_memsz;
+                                    if (phdr->p_flags & PF_X) {
+                                        sd->exec_ranges->push_back({seg_start, seg_end});
+                                    }
+                                    if (phdr->p_flags & PF_W) {
+                                        if (phdr->p_memsz > 0x100) {
+                                            sd->writable_segments->push_back({reinterpret_cast<uint8_t*>(seg_start), phdr->p_memsz});
+                                        }
+                                    }
+                                }
+                            }
+                            return 0;
+                        }, &scan_data);
+
+                        auto is_executable = [&exec_ranges](uintptr_t ptr) -> bool {
+                            for (const auto& range : exec_ranges) {
+                                if (ptr >= range.start && ptr < range.end) return true;
+                            }
+                            return false;
+                        };
+
+                        // Scan writable segments for a contiguous array of function pointers
+                        // GNatives typically has 256+ entries, all pointing to executable code
+                        // We look for at least 64 consecutive valid function pointers (8 bytes each)
+                        const size_t MIN_ENTRIES = 64;
+                        const size_t PTR_SIZE = 8;
+
+                        void* found_addr = nullptr;
+                        for (const auto& seg : writable_segments)
+                        {
+                            if (seg.size < MIN_ENTRIES * PTR_SIZE) continue;
+                            size_t consecutive = 0;
+                            size_t run_start = 0;
+
+                            for (size_t offset = 0; offset + PTR_SIZE <= seg.size; offset += PTR_SIZE)
+                            {
+                                uintptr_t ptr_val = *reinterpret_cast<uintptr_t*>(seg.start + offset);
+                                if (ptr_val >= 0x10000 && ptr_val <= 0x7fffffffffff && is_executable(ptr_val))
+                                {
+                                    if (consecutive == 0) run_start = offset;
+                                    consecutive++;
+                                    if (consecutive >= MIN_ENTRIES)
+                                    {
+                                        // Found a candidate — return the start of the run
+                                        found_addr = seg.start + run_start;
+                                        UE4SS_DBG("[UE4SS] Heuristic scan: GNatives candidate at %p (%zu consecutive entries)\n", found_addr, consecutive);
+                                        break;
+                                    }
+                                }
+                                else
+                                {
+                                    consecutive = 0;
+                                }
+                            }
+                            if (found_addr) break;
+                        }
+
+                        if (found_addr)
+                        {
+                            addr = found_addr;
+                        }
+                        else
+                        {
+                            UE4SS_DBG("[UE4SS] Heuristic scan: GNatives not found in writable segments\n");
+                        }
+                    }
+
                     if (addr)
                     {
                         Unreal::GNatives_Internal = reinterpret_cast<Unreal::FNativeFuncPtr*>(addr);
-                        scan_result.SuccessMessage.emplace_back(STR("GNatives found via dlsym"));
+                        scan_result.SuccessMessage.emplace_back(STR("GNatives found via dlsym/heuristic scan"));
                     }
                     else
                     {
@@ -1481,10 +1578,93 @@ namespace RC
                     void* addr = try_resolve("UObject::ProcessInternal");
                     if (!addr) addr = try_resolve("_ZN6UObject15ProcessInternalER5FFrameRPv");
                     if (!addr) addr = try_resolve("ProcessInternal");
+
+                    // AOB-Scan fallback for ProcessInternal
+                    // ProcessInternal(UObject* Context, FFrame& Stack, void* RESULT_DECL)
+                    // x86_64 calling convention: rdi=Context, rsi=Stack, rdx=RESULT_DECL
+                    // Typical prologue saves all three args and sets up a large stack frame:
+                    //   55                          push rbp
+                    //   41 54/55/56/57              push r12-r15
+                    //   53                          push rbx
+                    //   48 81 EC ?? ?? ?? ??        sub rsp, imm32 (large frame, usually 0x100+)
+                    //   48 89 9C 24 ?? ?? ?? ??     mov [rsp+X], rbx (save Context)
+                    //   48 89 B4 24 ?? ?? ?? ??     mov [rsp+X], rsi (save Stack)
+                    //   48 89 94 24 ?? ?? ?? ??     mov [rsp+X], rdx (save RESULT_DECL)
+                    //
+                    // We search for the distinctive pattern of three consecutive
+                    // "mov [rsp+disp32], reg" instructions with rdi/rsi/rdx as sources:
+                    //   48 89 9C 24 (mov [rsp+disp32], rbx)  — but rbx may not be set yet
+                    // More reliable: look for 48 89 94 24 (mov [rsp+disp32], rdx) near the start
+                    // followed by 48 89 B4 24 (mov [rsp+disp32], rsi)
+                    // Pattern: 48 89 94 24 ?? ?? ?? ?? 48 89 B4 24
+                    if (!addr)
+                    {
+                        UE4SS_DBG("[UE4SS] dlsym: ProcessInternal not found, trying AOB scan...\n");
+
+                        struct ExecSegment { uint8_t* start; size_t size; };
+                        std::vector<ExecSegment> exec_segments;
+
+                        dl_iterate_phdr([](struct dl_phdr_info* info, size_t, void* data) -> int {
+                            auto* segs = static_cast<std::vector<ExecSegment>*>(data);
+                            for (int i = 0; i < info->dlpi_phnum; i++) {
+                                const ElfW(Phdr)* phdr = &info->dlpi_phdr[i];
+                                if (phdr->p_type == PT_LOAD && (phdr->p_flags & PF_X)) {
+                                    uint8_t* seg_start = reinterpret_cast<uint8_t*>(info->dlpi_addr + phdr->p_vaddr);
+                                    size_t seg_size = phdr->p_memsz;
+                                    if (seg_size > 0x1000) segs->push_back({seg_start, seg_size});
+                                }
+                            }
+                            return 0;
+                        }, &exec_segments);
+
+                        // Pattern: mov [rsp+disp32], rdx; mov [rsp+disp32], rsi
+                        // 48 89 94 24 XX XX XX XX 48 89 B4 24
+                        const uint8_t pattern[] = { 0x48, 0x89, 0x94, 0x24 };
+                        const size_t pattern_len = 4;
+                        // After the 4-byte pattern + 4-byte displacement, we expect 48 89 B4 24
+                        const size_t check_offset = 8; // 4 (pattern) + 4 (disp32) = 8
+
+                        void* found_func = nullptr;
+                        for (const auto& seg : exec_segments)
+                        {
+                            if (seg.size < 128) continue;
+                            for (size_t offset = 0; offset + check_offset + 4 <= seg.size; offset++)
+                            {
+                                if (memcmp(seg.start + offset, pattern, pattern_len) != 0) continue;
+                                // Check if followed by mov [rsp+disp32], rsi (48 89 B4 24)
+                                if (memcmp(seg.start + offset + check_offset, "\x48\x89\xB4\x24", 4) != 0) continue;
+
+                                // Found the pattern. Scan backwards for function start.
+                                uint8_t* pattern_pos = seg.start + offset;
+                                uint8_t* func_start = nullptr;
+                                for (int back = 0; back < 80 && pattern_pos - back > seg.start; back++)
+                                {
+                                    uint8_t* candidate = pattern_pos - back;
+                                    if ((reinterpret_cast<uintptr_t>(candidate) % 16 == 0) && *candidate == 0x55)
+                                    { func_start = candidate; break; }
+                                    if ((reinterpret_cast<uintptr_t>(candidate) % 16 == 0) &&
+                                        candidate[0] == 0x48 && candidate[1] == 0x81 && candidate[2] == 0xEC)
+                                    { func_start = candidate; break; }
+                                    if (back > 0 && candidate[0] == 0xCC && candidate[1] != 0xCC)
+                                    { func_start = candidate + 1; break; }
+                                }
+                                if (!func_start) func_start = pattern_pos;
+
+                                found_func = func_start;
+                                UE4SS_DBG("[UE4SS] AOB scan: ProcessInternal candidate at %p\n", found_func);
+                                break;
+                            }
+                            if (found_func) break;
+                        }
+
+                        if (found_func) addr = found_func;
+                        else UE4SS_DBG("[UE4SS] AOB scan: ProcessInternal not found\n");
+                    }
+
                     if (addr)
                     {
                         Unreal::UObject::ProcessInternalInternal.assign_address(addr);
-                        scan_result.SuccessMessage.emplace_back(STR("ProcessInternal found via dlsym"));
+                        scan_result.SuccessMessage.emplace_back(STR("ProcessInternal found via dlsym/AOB scan"));
                     }
                     else
                     {
@@ -1497,10 +1677,98 @@ namespace RC
                     void* addr = try_resolve("UObject::ProcessLocalScriptFunction");
                     if (!addr) addr = try_resolve("_ZN6UObject26ProcessLocalScriptFunctionER5FFrameRPv");
                     if (!addr) addr = try_resolve("ProcessLocalScriptFunction");
+
+                    // AOB-Scan fallback for ProcessLocalScriptFunction
+                    // Same signature as ProcessInternal: (UObject* Context, FFrame& Stack, void* RESULT_DECL)
+                    // rdi=Context, rsi=Stack, rdx=RESULT_DECL
+                    // ProcessLocalScriptFunction typically has a shorter prologue and immediately
+                    // calls ProcessInternal or a related function. It often starts with:
+                    //   48 83 EC ??                sub rsp, imm8 (smaller frame)
+                    //   48 89 54 24 ??             mov [rsp+X], rdx (save RESULT_DECL)
+                    //   48 89 4C 24 ??             mov [rsp+X], rcx (save Context, but rcx not set yet?)
+                    // Or with RSP-relative stores using SIB byte:
+                    //   48 89 54 24 ??             mov [rsp+disp8], rdx
+                    //   48 89 74 24 ??             mov [rsp+disp8], rsi
+                    //   E8 ?? ?? ?? ??             call rel32 (to ProcessInternal or similar)
+                    //
+                    // Pattern: 48 89 54 24 ?? 48 89 74 24 ?? E8
+                    // (mov [rsp+disp8], rdx; mov [rsp+disp8], rsi; call rel32)
+                    if (!addr)
+                    {
+                        UE4SS_DBG("[UE4SS] dlsym: ProcessLocalScriptFunction not found, trying AOB scan...\n");
+
+                        struct ExecSegment { uint8_t* start; size_t size; };
+                        std::vector<ExecSegment> exec_segments;
+
+                        dl_iterate_phdr([](struct dl_phdr_info* info, size_t, void* data) -> int {
+                            auto* segs = static_cast<std::vector<ExecSegment>*>(data);
+                            for (int i = 0; i < info->dlpi_phnum; i++) {
+                                const ElfW(Phdr)* phdr = &info->dlpi_phdr[i];
+                                if (phdr->p_type == PT_LOAD && (phdr->p_flags & PF_X)) {
+                                    uint8_t* seg_start = reinterpret_cast<uint8_t*>(info->dlpi_addr + phdr->p_vaddr);
+                                    size_t seg_size = phdr->p_memsz;
+                                    if (seg_size > 0x1000) segs->push_back({seg_start, seg_size});
+                                }
+                            }
+                            return 0;
+                        }, &exec_segments);
+
+                        // Pattern: mov [rsp+disp8], rdx; mov [rsp+disp8], rsi; call rel32
+                        // 48 89 54 24 XX 48 89 74 24 XX E8
+                        const uint8_t pattern[] = { 0x48, 0x89, 0x54, 0x24 };
+                        const size_t pattern_len = 4;
+                        // After pattern + 1 (disp8) = 5, then check for 48 89 74 24 at offset 5
+                        // After that + 1 (disp8) = 10, then check for E8 at offset 10
+
+                        void* found_func = nullptr;
+                        for (const auto& seg : exec_segments)
+                        {
+                            if (seg.size < 64) continue;
+                            for (size_t offset = 0; offset + 15 <= seg.size; offset++)
+                            {
+                                if (memcmp(seg.start + offset, pattern, pattern_len) != 0) continue;
+                                // Check for mov [rsp+disp8], rsi at offset+5
+                                if (memcmp(seg.start + offset + 5, "\x48\x89\x74\x24", 4) != 0) continue;
+                                // Check for call rel32 at offset+10
+                                if (seg.start[offset + 10] != 0xE8) continue;
+
+                                // Validate call target
+                                int32_t rel32 = *reinterpret_cast<int32_t*>(seg.start + offset + 11);
+                                uint8_t* call_target = seg.start + offset + 15 + rel32;
+                                uintptr_t call_target_addr = reinterpret_cast<uintptr_t>(call_target);
+                                if (call_target_addr < 0x10000 || call_target_addr > 0x7fffffffffff) continue;
+
+                                // Scan backwards for function start
+                                uint8_t* pattern_pos = seg.start + offset;
+                                uint8_t* func_start = nullptr;
+                                for (int back = 0; back < 48 && pattern_pos - back > seg.start; back++)
+                                {
+                                    uint8_t* candidate = pattern_pos - back;
+                                    if ((reinterpret_cast<uintptr_t>(candidate) % 16 == 0) && *candidate == 0x55)
+                                    { func_start = candidate; break; }
+                                    if ((reinterpret_cast<uintptr_t>(candidate) % 16 == 0) &&
+                                        candidate[0] == 0x48 && (candidate[1] == 0x81 || candidate[1] == 0x83) && candidate[2] == 0xEC)
+                                    { func_start = candidate; break; }
+                                    if (back > 0 && candidate[0] == 0xCC && candidate[1] != 0xCC)
+                                    { func_start = candidate + 1; break; }
+                                }
+                                if (!func_start) func_start = pattern_pos;
+
+                                found_func = func_start;
+                                UE4SS_DBG("[UE4SS] AOB scan: ProcessLocalScriptFunction candidate at %p\n", found_func);
+                                break;
+                            }
+                            if (found_func) break;
+                        }
+
+                        if (found_func) addr = found_func;
+                        else UE4SS_DBG("[UE4SS] AOB scan: ProcessLocalScriptFunction not found\n");
+                    }
+
                     if (addr)
                     {
                         Unreal::UObject::ProcessLocalScriptFunctionInternal.assign_address(addr);
-                        scan_result.SuccessMessage.emplace_back(STR("ProcessLocalScriptFunction found via dlsym"));
+                        scan_result.SuccessMessage.emplace_back(STR("ProcessLocalScriptFunction found via dlsym/AOB scan"));
                     }
                     else
                     {
