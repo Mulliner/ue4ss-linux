@@ -51,6 +51,7 @@
 #include <DiscordWebhook.hpp>
 #include <link.h>
 #include <elf.h>
+#include <cstring>
 #endif
 #include <ObjectDumper/ObjectToString.hpp>
 #include <SDKGenerator/Generator.hpp>
@@ -972,14 +973,8 @@ namespace RC
 
                     dl_iterate_phdr([](struct dl_phdr_info* info, size_t, void* data) -> int {
                         auto* segs = static_cast<std::vector<SegmentInfo>*>(data);
-                        // The first entry (empty name or empty path) is the main executable
-                        if (info->dlpi_name[0] != '\0') {
-                            // Also check if it's the main executable by path
-                            const char* name = info->dlpi_name;
-                            if (!strstr(name, "Pal") && !strstr(name, "pal") && !strstr(name, "UE") && !strstr(name, "ue")) {
-                                return 0;
-                            }
-                        }
+                        // Always include the main executable (first entry with empty name)
+                        // and all loaded shared libraries — GUObjectArray could be in any module's .data/.bss
                         for (int i = 0; i < info->dlpi_phnum; i++) {
                             const ElfW(Phdr)* phdr = &info->dlpi_phdr[i];
                             if (phdr->p_type == PT_LOAD && (phdr->p_flags & PF_W)) {
@@ -1106,10 +1101,109 @@ namespace RC
                     if (!addr) addr = try_resolve("_ZN5FName8ToStringEv");
                     // Try const variant
                     if (!addr) addr = try_resolve("_ZNK5FName8ToStringEv");
+
+                    // AOB-Scan fallback for FName::ToString
+                    // FName::ToString on x86_64 typically:
+                    //   48 8D 05 ?? ?? ?? ??    lea rax, [rip + offset]  (load FNameEntry or string buffer)
+                    //   48 89 ??                mov [rsp+...], rax or similar
+                    //   E8 ?? ?? ?? ??          call rel32 (to FString allocation or append)
+                    // A simpler approach: search for the pattern that loads the FName comparison index
+                    // and calls the name display function.
+                    // Pattern: 8B 89 ?? ?? ?? ?? (mov ecx, [rcx+offset] to get ComparisonIndex)
+                    // followed by E8 (call) — this is very characteristic of FName::ToString
+                    if (!addr)
+                    {
+                        UE4SS_DBG("[UE4SS] dlsym: FName::ToString not found, trying AOB scan...\n");
+
+                        struct ExecSegment { uint8_t* start; size_t size; };
+                        std::vector<ExecSegment> exec_segments;
+
+                        dl_iterate_phdr([](struct dl_phdr_info* info, size_t, void* data) -> int {
+                            auto* segs = static_cast<std::vector<ExecSegment>*>(data);
+                            for (int i = 0; i < info->dlpi_phnum; i++) {
+                                const ElfW(Phdr)* phdr = &info->dlpi_phdr[i];
+                                if (phdr->p_type == PT_LOAD && (phdr->p_flags & PF_X)) {
+                                    uint8_t* seg_start = reinterpret_cast<uint8_t*>(info->dlpi_addr + phdr->p_vaddr);
+                                    size_t seg_size = phdr->p_memsz;
+                                    if (seg_size > 0x1000) segs->push_back({seg_start, seg_size});
+                                }
+                            }
+                            return 0;
+                        }, &exec_segments);
+
+                        // Pattern: mov ecx, [rcx+0x00]; ... call rel32
+                        // FName::ToString reads the ComparisonIndex from the FName (offset 0x00)
+                        // 8B 89 00 00 00 00    mov ecx, [rcx+0x0]
+                        // But more commonly it's:
+                        // 89 88 00 00 00 00    mov [rax+0x0], ecx  (storing index)
+                        // Or the function reads from the FName struct and calls FNameEntry::ToString
+                        //
+                        // Better pattern: look for the lea rax, [rip+?] followed by mov and call
+                        // that's typical of ToString implementations.
+                        // 48 8B 01              mov rax, [rcx]        (load ComparisonIndex or pointer)
+                        // 48 8D 0D ?? ?? ?? ??  lea rcx, [rip+offset] (load FNameEntry table)
+                        // E8 ?? ?? ?? ??        call rel32
+                        const uint8_t pattern1[] = { 0x48, 0x8B, 0x01, 0x48, 0x8D, 0x0D };
+                        const size_t pattern1_len = sizeof(pattern1);
+
+                        void* found_func = nullptr;
+                        for (const auto& seg : exec_segments)
+                        {
+                            if (seg.size < pattern1_len + 32) continue;
+                            for (size_t offset = 0; offset + pattern1_len + 16 <= seg.size; offset++)
+                            {
+                                if (memcmp(seg.start + offset, pattern1, pattern1_len) != 0) continue;
+
+                                // Scan backwards for function start
+                                uint8_t* pattern_pos = seg.start + offset;
+                                uint8_t* func_start = nullptr;
+                                for (int back = 0; back < 64 && pattern_pos - back > seg.start; back++)
+                                {
+                                    uint8_t* candidate = pattern_pos - back;
+                                    if ((reinterpret_cast<uintptr_t>(candidate) % 16 == 0) && *candidate == 0x55)
+                                    { func_start = candidate; break; }
+                                    if ((reinterpret_cast<uintptr_t>(candidate) % 16 == 0) &&
+                                        candidate[0] == 0x48 && candidate[1] == 0x81 && candidate[2] == 0xEC)
+                                    { func_start = candidate; break; }
+                                    if (back > 0 && candidate[0] == 0xCC && candidate[1] != 0xCC)
+                                    { func_start = candidate + 1; break; }
+                                }
+                                if (!func_start) func_start = pattern_pos;
+
+                                // Validate call target if there's a call after the lea
+                                // lea rcx, [rip+offset] is 7 bytes, check if E8 follows within 16 bytes
+                                bool has_valid_call = false;
+                                for (size_t c = pattern1_len; c < pattern1_len + 16 && offset + c + 5 <= seg.size; c++)
+                                {
+                                    if (pattern_pos[c] == 0xE8)
+                                    {
+                                        int32_t rel32 = *reinterpret_cast<int32_t*>(pattern_pos + c + 1);
+                                        uint8_t* call_target = pattern_pos + c + 5 + rel32;
+                                        uintptr_t call_target_addr = reinterpret_cast<uintptr_t>(call_target);
+                                        if (call_target_addr >= 0x10000 && call_target_addr <= 0x7fffffffffff)
+                                        {
+                                            has_valid_call = true;
+                                            break;
+                                        }
+                                    }
+                                }
+                                if (!has_valid_call) continue;
+
+                                found_func = func_start;
+                                UE4SS_DBG("[UE4SS] AOB scan: FName::ToString candidate at %p\n", found_func);
+                                break;
+                            }
+                            if (found_func) break;
+                        }
+
+                        if (found_func) addr = found_func;
+                        else UE4SS_DBG("[UE4SS] AOB scan: FName::ToString not found\n");
+                    }
+
                     if (addr)
                     {
                         Unreal::FName::ToStringInternal.assign_address(addr);
-                        scan_result.SuccessMessage.emplace_back(STR("FName::ToString found via dlsym"));
+                        scan_result.SuccessMessage.emplace_back(STR("FName::ToString found via dlsym/AOB scan"));
                     }
                     else
                     {
@@ -1197,10 +1291,141 @@ namespace RC
                     if (!addr) addr = try_resolve("_ZN5FNameC2EPKDs");
                     // C2 base constructor variants
                     if (!addr) addr = try_resolve("_ZN5FNameC2Ev");
+
+                    // AOB-Scan fallback: search executable segments for FName constructor pattern
+                    // The FName(const CharType*, EFindName) constructor on x86_64 UE5 typically:
+                    //   1. Saves registers (push rbp; push rbx; sub rsp, ...)
+                    //   2. Moves rsi (CharType*) to rdi or rdx for the string parameter
+                    //   3. Calls FName::Init or FNameEntryLookup
+                    // We search for the common pattern: mov rdi, rsi; mov esi, edx (or similar)
+                    // followed by a call instruction within the first few bytes
+                    if (!addr)
+                    {
+                        UE4SS_DBG("[UE4SS] dlsym: FName::FName not found, trying AOB scan...\n");
+
+                        struct ExecSegment {
+                            uint8_t* start;
+                            size_t size;
+                        };
+                        std::vector<ExecSegment> exec_segments;
+
+                        dl_iterate_phdr([](struct dl_phdr_info* info, size_t, void* data) -> int {
+                            auto* segs = static_cast<std::vector<ExecSegment>*>(data);
+                            for (int i = 0; i < info->dlpi_phnum; i++) {
+                                const ElfW(Phdr)* phdr = &info->dlpi_phdr[i];
+                                if (phdr->p_type == PT_LOAD && (phdr->p_flags & PF_X)) {
+                                    uint8_t* seg_start = reinterpret_cast<uint8_t*>(info->dlpi_addr + phdr->p_vaddr);
+                                    size_t seg_size = phdr->p_memsz;
+                                    if (seg_size > 0x1000) {
+                                        segs->push_back({seg_start, seg_size});
+                                    }
+                                }
+                            }
+                            return 0;
+                        }, &exec_segments);
+
+                        // Pattern: FName constructor typically starts with:
+                        // 55                          push rbp
+                        // 41 57                       push r15
+                        // 41 56                       push r14
+                        // 41 55                       push r13
+                        // 41 54                       push r12
+                        // 53                          push rbx
+                        // 48 81 EC ?? ?? ?? ??        sub rsp, imm32
+                        // 48 89 FB                    mov rbx, rdi    (save CharType* arg)
+                        // 48 89 F7                    mov rdi, rsi    (pass EFindName as first arg to sub-call)
+                        // ... followed by a call instruction
+                        //
+                        // Alternative shorter pattern (more common in optimized builds):
+                        // 48 89 FB                    mov rbx, rdi
+                        // 48 89 F7                    mov rdi, rsi
+                        // E8 ?? ?? ?? ??              call rel32
+                        //
+                        // We search for: 48 89 FB 48 89 F7 E8
+                        // which is: mov rbx, rdi; mov rdi, rsi; call <rel32>
+                        // This pattern is very characteristic of FName(const CharType*, EFindName)
+                        // where CharType* is in rdi and EFindName is in rsi, and the constructor
+                        // passes EFindName to a sub-call while saving CharType* in rbx.
+
+                        const uint8_t pattern[] = { 0x48, 0x89, 0xFB, 0x48, 0x89, 0xF7, 0xE8 };
+                        const size_t pattern_len = sizeof(pattern);
+                        // Look for this pattern a few bytes before the actual function start
+                        // (after the prologue saves). We scan backwards from the pattern match
+                        // to find the function entry point (typically a push rbp or sub rsp).
+
+                        void* found_func = nullptr;
+                        for (const auto& seg : exec_segments)
+                        {
+                            if (seg.size < pattern_len + 64) continue;
+                            for (size_t offset = 0; offset + pattern_len + 32 <= seg.size; offset++)
+                            {
+                                if (memcmp(seg.start + offset, pattern, pattern_len) != 0) continue;
+
+                                // Found the pattern. Now scan backwards (up to 64 bytes) to find the function start.
+                                // Function start is typically marked by:
+                                //   - push rbp (0x55) at an aligned boundary
+                                //   - sub rsp, imm32 (0x48 0x81 0xEC) at an aligned boundary
+                                //   - int3 padding (0xCC) before the function
+                                uint8_t* pattern_pos = seg.start + offset;
+                                uint8_t* func_start = nullptr;
+
+                                for (int back = 0; back < 64 && pattern_pos - back > seg.start; back++)
+                                {
+                                    uint8_t* candidate = pattern_pos - back;
+                                    // Check for push rbp (0x55) at 16-byte aligned boundary
+                                    if ((reinterpret_cast<uintptr_t>(candidate) % 16 == 0) && *candidate == 0x55)
+                                    {
+                                        func_start = candidate;
+                                        break;
+                                    }
+                                    // Check for sub rsp, imm32 (0x48 0x81 0xEC) at 16-byte aligned boundary
+                                    if ((reinterpret_cast<uintptr_t>(candidate) % 16 == 0) &&
+                                        candidate[0] == 0x48 && candidate[1] == 0x81 && candidate[2] == 0xEC)
+                                    {
+                                        func_start = candidate;
+                                        break;
+                                    }
+                                    // Check for int3 padding before function (0xCC followed by non-0xCC)
+                                    if (back > 0 && candidate[0] == 0xCC && candidate[1] != 0xCC)
+                                    {
+                                        func_start = candidate + 1;
+                                        break;
+                                    }
+                                }
+
+                                if (!func_start)
+                                {
+                                    // Use the pattern position itself as fallback
+                                    func_start = pattern_pos;
+                                }
+
+                                // Validate: the call target (rel32 after E8) should point within an executable segment
+                                int32_t rel32 = *reinterpret_cast<int32_t*>(pattern_pos + 7);
+                                uint8_t* call_target = pattern_pos + 7 + 4 + rel32;
+                                uintptr_t call_target_addr = reinterpret_cast<uintptr_t>(call_target);
+                                if (call_target_addr < 0x10000 || call_target_addr > 0x7fffffffffff) continue;
+
+                                found_func = func_start;
+                                UE4SS_DBG("[UE4SS] AOB scan: FName constructor candidate at %p (pattern at offset %zu)\n", found_func, offset);
+                                break;
+                            }
+                            if (found_func) break;
+                        }
+
+                        if (found_func)
+                        {
+                            addr = found_func;
+                        }
+                        else
+                        {
+                            UE4SS_DBG("[UE4SS] AOB scan: FName constructor not found in executable segments\n");
+                        }
+                    }
+
                     if (addr)
                     {
                         Unreal::FName::ConstructorInternal.assign_address(addr);
-                        scan_result.SuccessMessage.emplace_back(STR("FName::FName found via dlsym"));
+                        scan_result.SuccessMessage.emplace_back(STR("FName::FName found via dlsym/AOB scan"));
                     }
                     else
                     {
