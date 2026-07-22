@@ -1212,14 +1212,108 @@ namespace RC
                 };
 
                 // Override ProcessEvent scan — needed for hooking UObject::ProcessEvent
+                // ProcessEvent is critical: all Blueprint function calls (give, tp, spawn, etc.) go through it
+                // Signature: void(UObject* this, UFunction* Function, void* Parms)
+                // rdi=this, rsi=Function, rdx=Parms
                 config.ScanOverrides.process_event = [&](std::vector<SignatureContainer>&, Unreal::Signatures::ScanResult& scan_result) {
                     void* addr = try_resolve("UObject::ProcessEvent");
                     if (!addr) addr = try_resolve("_ZN6UObject12ProcessEventEP8UFunctionPv");
                     if (!addr) addr = try_resolve("ProcessEvent");
+
+                    // AOB-Scan fallback for ProcessEvent
+                    // Pattern: mov rbx, rdi; test rsi, rsi (48 89 FB 48 85 F6)
+                    // This saves the this-pointer in rbx and null-checks the Function parameter.
+                    // ProcessEvent always does this null-check early because it dereferences Function.
+                    // Followed by a conditional jump (je/jz = 74 XX or 0F 84) for the null case.
+                    if (!addr)
+                    {
+                        UE4SS_DBG("[UE4SS] dlsym: ProcessEvent not found, trying AOB scan...\n");
+
+                        struct ExecSegment { uint8_t* start; size_t size; };
+                        std::vector<ExecSegment> exec_segments;
+
+                        dl_iterate_phdr([](struct dl_phdr_info* info, size_t, void* data) -> int {
+                            auto* segs = static_cast<std::vector<ExecSegment>*>(data);
+                            for (int i = 0; i < info->dlpi_phnum; i++) {
+                                const ElfW(Phdr)* phdr = &info->dlpi_phdr[i];
+                                if (phdr->p_type == PT_LOAD && (phdr->p_flags & PF_X)) {
+                                    uint8_t* seg_start = reinterpret_cast<uint8_t*>(info->dlpi_addr + phdr->p_vaddr);
+                                    size_t seg_size = phdr->p_memsz;
+                                    if (seg_size > 0x1000) segs->push_back({seg_start, seg_size});
+                                }
+                            }
+                            return 0;
+                        }, &exec_segments);
+
+                        // Pattern: mov rbx, rdi; test rsi, rsi (48 89 FB 48 85 F6)
+                        // Followed by je (74 XX) or jz (0F 84 XX XX XX XX)
+                        const uint8_t pattern[] = { 0x48, 0x89, 0xFB, 0x48, 0x85, 0xF6 };
+                        const size_t pattern_len = sizeof(pattern);
+
+                        void* found_func = nullptr;
+                        for (const auto& seg : exec_segments)
+                        {
+                            if (seg.size < pattern_len + 32) continue;
+                            for (size_t offset = 0; offset + pattern_len + 16 <= seg.size; offset++)
+                            {
+                                if (memcmp(seg.start + offset, pattern, pattern_len) != 0) continue;
+
+                                // Check for conditional jump after the test (null-check branch)
+                                uint8_t* after_pattern = seg.start + offset + pattern_len;
+                                bool has_cond_jump = false;
+                                if (after_pattern[0] == 0x74 || after_pattern[0] == 0x75) has_cond_jump = true;
+                                if (after_pattern[0] == 0x0F && (after_pattern[1] == 0x84 || after_pattern[1] == 0x85)) has_cond_jump = true;
+                                if (!has_cond_jump) continue;
+
+                                // Scan backwards for function start
+                                uint8_t* pattern_pos = seg.start + offset;
+                                uint8_t* func_start = nullptr;
+                                for (int back = 0; back < 64 && pattern_pos - back > seg.start; back++)
+                                {
+                                    uint8_t* candidate = pattern_pos - back;
+                                    if ((reinterpret_cast<uintptr_t>(candidate) % 16 == 0) && *candidate == 0x55)
+                                    { func_start = candidate; break; }
+                                    if ((reinterpret_cast<uintptr_t>(candidate) % 16 == 0) &&
+                                        candidate[0] == 0x48 && candidate[1] == 0x81 && candidate[2] == 0xEC)
+                                    { func_start = candidate; break; }
+                                    if ((reinterpret_cast<uintptr_t>(candidate) % 16 == 0) &&
+                                        candidate[0] == 0x48 && candidate[1] == 0x83 && candidate[2] == 0xEC)
+                                    { func_start = candidate; break; }
+                                    if (back > 0 && candidate[0] == 0xCC && candidate[1] != 0xCC)
+                                    { func_start = candidate + 1; break; }
+                                }
+                                if (!func_start) func_start = pattern_pos;
+
+                                // Validate: look for another call instruction within 256 bytes (ProcessEvent calls sub-functions)
+                                bool has_call = false;
+                                for (size_t c = pattern_len; c < pattern_len + 256 && offset + c + 5 <= seg.size; c++)
+                                {
+                                    if (seg.start[offset + c] == 0xE8)
+                                    {
+                                        int32_t rel32 = *reinterpret_cast<int32_t*>(seg.start + offset + c + 1);
+                                        uint8_t* call_target = seg.start + offset + c + 5 + rel32;
+                                        uintptr_t call_target_addr = reinterpret_cast<uintptr_t>(call_target);
+                                        if (call_target_addr >= 0x10000 && call_target_addr <= 0x7fffffffffff)
+                                        { has_call = true; break; }
+                                    }
+                                }
+                                if (!has_call) continue;
+
+                                found_func = func_start;
+                                UE4SS_DBG("[UE4SS] AOB scan: ProcessEvent candidate at %p\n", found_func);
+                                break;
+                            }
+                            if (found_func) break;
+                        }
+
+                        if (found_func) addr = found_func;
+                        else UE4SS_DBG("[UE4SS] AOB scan: ProcessEvent not found\n");
+                    }
+
                     if (addr)
                     {
                         Unreal::UObject::ProcessEventInternal.assign_address(addr);
-                        scan_result.SuccessMessage.emplace_back(STR("ProcessEvent found via dlsym"));
+                        scan_result.SuccessMessage.emplace_back(STR("ProcessEvent found via dlsym/AOB scan"));
                     }
                     else
                     {
