@@ -62,6 +62,72 @@ jobs:
         run: |
           cmake --build build_linux --target UE4SS --verbose
 
+      - name: Generate Changelog
+        id: changelog
+        run: |
+          # Get the previous release tag (sorted by version, excluding current tag)
+          PREV_TAG=$(git tag --sort=-v:refname | grep -v "${{ inputs.tag_name }}" | head -1)
+          
+          echo "Previous tag: ${PREV_TAG:-none}"
+          
+          if [ -n "$PREV_TAG" ]; then
+            COMMITS=$(git log --pretty=format:"%s" "${PREV_TAG}..HEAD" --no-merges 2>/dev/null || echo "")
+          else
+            COMMITS=$(git log --pretty=format:"%s" -50 --no-merges 2>/dev/null || echo "")
+          fi
+          
+          # Categorize commits
+          FEATURES=""
+          FIXES=""
+          REFACTORS=""
+          OTHER=""
+          
+          while IFS= read -r line; do
+            [ -z "$line" ] && continue
+            lower=$(echo "$line" | tr '[:upper:]' '[:lower:]')
+            if echo "$lower" | grep -qE '^(feat|feature|add|implement)'; then
+              FEATURES="${FEATURES}- ${line}\n"
+            elif echo "$lower" | grep -qE '^(fix|bugfix|hotfix)'; then
+              FIXES="${FIXES}- ${line}\n"
+            elif echo "$lower" | grep -qE '^(refactor|cleanup|optim|perf)'; then
+              REFACTORS="${REFACTORS}- ${line}\n"
+            else
+              OTHER="${OTHER}- ${line}\n"
+            fi
+          done <<< "$COMMITS"
+          
+          # Build changelog output
+          {
+            echo "CHANGELOG<<EOF"
+            if [ -n "$FEATURES" ]; then
+              echo "### ✨ Features / Neue Funktionen"
+              printf "$FEATURES"
+              echo ""
+            fi
+            if [ -n "$FIXES" ]; then
+              echo "### 🐛 Bug Fixes"
+              printf "$FIXES"
+              echo ""
+            fi
+            if [ -n "$REFACTORS" ]; then
+              echo "### 🔧 Refactoring & Optimierung"
+              printf "$REFACTORS"
+              echo ""
+            fi
+            if [ -n "$OTHER" ]; then
+              echo "### 📝 Sonstige Änderungen"
+              printf "$OTHER"
+              echo ""
+            fi
+            if [ -z "$FEATURES" ] && [ -z "$FIXES" ] && [ -z "$REFACTORS" ] && [ -z "$OTHER" ]; then
+              echo "Keine Änderungen seit dem letzten Release."
+              echo ""
+            fi
+            echo "---"
+            echo "**Vollständige Commit-Historie:** [${PREV_TAG:-initial}...${{ inputs.tag_name }}](https://github.com/${{ github.repository }}/compare/${PREV_TAG:-$(git rev-list --max-parents=0 HEAD)}...${{ inputs.tag_name }})"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+          
       - name: Strip and prepare artifacts
         run: |
           mkdir -p release
@@ -109,29 +175,28 @@ jobs:
           target_commitish: linux-native
           body: |
             ## UE4SS ${{ inputs.tag_name }} — Linux Native Build
-
-            ### Features
-            - Full Linux native build with GUI support (GLFW3/OpenGL3 backend)
-            - Headless EGL mode for server environments (no DISPLAY required)
-            - Windows CRT secure functions compatibility layer
-            - Zero build warnings on Linux
-
-            ### Build Configuration
+            
+            ${{ steps.changelog.outputs.CHANGELOG }}
+            
+            ---
+            
+            ### Build-Konfiguration
             - Build Type: Game__Dev__Linux64
             - GUI: Enabled (GLFW3/OpenGL3)
             - Input: Disabled
             - Profilers: Disabled
-
-            ### Artifacts
+            - Compiler: GCC (Ubuntu 24.04)
+            
+            ### Artefakte
             - `libUE4SS.so` — Stripped shared library
             - `BUILD_INFO.txt` — Build metadata
-
-            ### Usage
+            
+            ### Verwendung
             ```bash
             LD_PRELOAD=./libUE4SS.so ./YourGameBinary
             ```
-
-            ### Compatibility
+            
+            ### Kompatibilität
             - Built on Ubuntu 24.04 (x86_64)
             - Requires: libGL, libEGL, libX11, libXrandr, libXinerama, libXcursor, libXi
             - Engine Tick Hook: Auto-detected via dlsym (or manual override in UE4SS_Addresses.ini)
