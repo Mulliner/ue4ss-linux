@@ -331,7 +331,7 @@ namespace RC::Unreal::UObjectGlobals
                 {
                     // Parse InName path parts into FNames for comparison
                     // InName format: "/Script/Engine.Default__GameplayStatics" or "Package.Outer.Object"
-                    auto InNameStr = ToCharTypePtr(InName);
+                    StringType InNameStr = ToCharTypePtr(InName);
                     std::vector<FName> InNameParts;
                     // Split by '.' and ':'
                     size_t start = 0;
