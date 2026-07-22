@@ -69,85 +69,126 @@ jobs:
       - name: Generate Changelog
         id: changelog
         run: |
-          # Get the previous release tag — filter for linux-dev tags, sorted by creation date
+          # Get the previous release tag
           PREV_TAG=$(git tag --sort=-creatordate | grep "linux-dev" | grep -v "${{ inputs.tag_name }}" | head -1)
-          
-          # If no linux-dev tag found, fall back to any tag
           if [ -z "$PREV_TAG" ]; then
             PREV_TAG=$(git tag --sort=-creatordate | grep -v "${{ inputs.tag_name }}" | head -1)
           fi
-          
           echo "Previous tag: ${PREV_TAG:-none}"
           
-          if [ -n "$PREV_TAG" ]; then
-            COMMITS=$(git log --pretty=format:"%s" "${PREV_TAG}..HEAD" --no-merges 2>/dev/null || echo "")
-          else
-            COMMITS=$(git log --pretty=format:"%s" -50 --no-merges 2>/dev/null || echo "")
-          fi
+          # Export for Python
+          export PREV_TAG
+          export RELEASE_TAG="${{ inputs.tag_name }}"
+          export REPO="${{ github.repository }}"
           
-          # Build changelog in a temp file
-          CHANGELOG_FILE=$(mktemp)
-          
-          # Categorize commits and write to temp file
-          FEATURES_FILE=$(mktemp)
-          FIXES_FILE=$(mktemp)
-          REFACTORS_FILE=$(mktemp)
-          OTHER_FILE=$(mktemp)
-          
-          while IFS= read -r line; do
-            [ -z "$line" ] && continue
-            lower=$(echo "$line" | tr '[:upper:]' '[:lower:]')
-            if echo "$lower" | grep -qE '^(feat|feature|add|implement)'; then
-              echo "- ${line}" >> "$FEATURES_FILE"
-            elif echo "$lower" | grep -qE '^(fix|bugfix|hotfix)'; then
-              echo "- ${line}" >> "$FIXES_FILE"
-            elif echo "$lower" | grep -qE '^(refactor|cleanup|optim|perf)'; then
-              echo "- ${line}" >> "$REFACTORS_FILE"
-            else
-              echo "- ${line}" >> "$OTHER_FILE"
-            fi
-          done <<< "$COMMITS"
-          
+          python3 << 'PYEOF'
+          import subprocess, os, re, sys
+
+          prev_tag = os.environ.get("PREV_TAG", "")
+          release_tag = os.environ.get("RELEASE_TAG", "")
+          repo = os.environ.get("REPO", "")
+
+          # Get commits with subject and body
+          if prev_tag:
+              fmt = "%x00%s%n%b"
+              result = subprocess.run(
+                  ["git", "log", f"--pretty=format:{fmt}", f"{prev_tag}..HEAD", "--no-merges"],
+                  capture_output=True, text=True
+              )
+          else:
+              result = subprocess.run(
+                  ["git", "log", f"--pretty=format:{fmt}", "-50", "--no-merges"],
+                  capture_output=True, text=True
+              )
+
+          commits_raw = result.stdout.strip()
+          if not commits_raw:
+              commits = []
+          else:
+              # Split by null byte delimiter
+              commits = [c.strip() for c in commits_raw.split("\x00") if c.strip()]
+
+          # Categorize commits
+          categories = {
+              "features": [],
+              "fixes": [],
+              "refactors": [],
+              "other": []
+          }
+
+          for commit in commits:
+              lines = commit.split("\n")
+              subject = lines[0].strip() if lines else ""
+              body_lines = [l.strip() for l in lines[1:] if l.strip()]
+
+              if not subject:
+                  continue
+
+              lower = subject.lower()
+              if re.match(r'^(feat|feature|add|implement)', lower):
+                  cat = "features"
+              elif re.match(r'^(fix|bugfix|hotfix)', lower):
+                  cat = "fixes"
+              elif re.match(r'^(refactor|cleanup|optim|perf)', lower):
+                  cat = "refactors"
+              else:
+                  cat = "other"
+
+              # Build entry: bold subject + sub-bullets from body
+              entry = f"- **{subject}**"
+              for bl in body_lines:
+                  # Remove leading "- " if present to avoid double bullets
+                  bl = re.sub(r'^[-•]\s*', '', bl)
+                  entry += f"\n  - {bl}"
+              entry += "\n"
+              categories[cat].append(entry)
+
           # Assemble changelog
-          {
-            if [ -s "$FEATURES_FILE" ]; then
-              echo "### ✨ Features"
-              cat "$FEATURES_FILE"
-              echo ""
-            fi
-            if [ -s "$FIXES_FILE" ]; then
-              echo "### 🐛 Bug Fixes"
-              cat "$FIXES_FILE"
-              echo ""
-            fi
-            if [ -s "$REFACTORS_FILE" ]; then
-              echo "### 🔧 Refactoring & Optimization"
-              cat "$REFACTORS_FILE"
-              echo ""
-            fi
-            if [ -s "$OTHER_FILE" ]; then
-              echo "### 📝 Other Changes"
-              cat "$OTHER_FILE"
-              echo ""
-            fi
-            if [ ! -s "$FEATURES_FILE" ] && [ ! -s "$FIXES_FILE" ] && [ ! -s "$REFACTORS_FILE" ] && [ ! -s "$OTHER_FILE" ]; then
-              echo "No changes since the last release."
-              echo ""
-            fi
-            echo "---"
-            COMPARE_URL="https://github.com/${{ github.repository }}/compare/${PREV_TAG:-$(git rev-list --max-parents=0 HEAD)}...${{ inputs.tag_name }}"
-            echo "**Full commit history:** [${PREV_TAG:-initial}...${{ inputs.tag_name }}](${COMPARE_URL})"
-          } > "$CHANGELOG_FILE"
-          
-          # Write to GITHUB_OUTPUT using heredoc
-          {
-            echo "CHANGELOG<<CHANGELOG_EOF"
-            cat "$CHANGELOG_FILE"
-            echo "CHANGELOG_EOF"
-          } >> "$GITHUB_OUTPUT"
-          
-          # Cleanup
-          rm -f "$FEATURES_FILE" "$FIXES_FILE" "$REFACTORS_FILE" "$OTHER_FILE" "$CHANGELOG_FILE"
+          output = []
+          if categories["features"]:
+              output.append("### ✨ Features")
+              output.extend(categories["features"])
+              output.append("")
+          if categories["fixes"]:
+              output.append("### 🐛 Bug Fixes")
+              output.extend(categories["fixes"])
+              output.append("")
+          if categories["refactors"]:
+              output.append("### 🔧 Refactoring & Optimization")
+              output.extend(categories["refactors"])
+              output.append("")
+          if categories["other"]:
+              output.append("### 📝 Other Changes")
+              output.extend(categories["other"])
+              output.append("")
+          if not any(categories.values()):
+              output.append("No changes since the last release.")
+              output.append("")
+
+          output.append("---")
+          # Build compare URL
+          if prev_tag:
+              compare_base = prev_tag
+          else:
+              # Get initial commit
+              r = subprocess.run(["git", "rev-list", "--max-parents=0", "HEAD"], capture_output=True, text=True)
+              compare_base = r.stdout.strip().split("\n")[0] if r.stdout.strip() else "initial"
+
+          compare_url = f"https://github.com/{repo}/compare/{compare_base}...{release_tag}"
+          output.append(f"**Full commit history:** [{prev_tag or 'initial'}...{release_tag}]({compare_url})")
+
+          changelog = "\n".join(output)
+
+          # Write to GITHUB_OUTPUT
+          gh_output = os.environ.get("GITHUB_OUTPUT", "")
+          if gh_output:
+              with open(gh_output, "a") as f:
+                  f.write("CHANGELOG<<CHANGELOG_EOF\n")
+                  f.write(changelog + "\n")
+                  f.write("CHANGELOG_EOF\n")
+
+          print(changelog)
+          PYEOF
           
       - name: Strip and prepare artifacts
         run: |
