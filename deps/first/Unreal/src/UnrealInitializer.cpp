@@ -596,6 +596,58 @@ namespace RC::Unreal::UnrealInitializer
             OutputResult(ScanResult, OutputErrorsByThrowing::Yes, ErrorsOnly::Yes);
         };
 
+#ifdef __linux__
+        // On Linux, ps_scan and DoScan are skipped (Windows-specific AOB patterns / empty container crash).
+        // Call ScanOverrides directly to resolve functions via dlsym and heuristic scans.
+        // Without this, GUObjectArray and all other addresses remain null and UE4SS enters "limited mode".
+        {
+            Signatures::ScanResult override_result;
+            std::vector<SignatureContainer> empty_containers;
+
+            fprintf(stderr, "[UE4SS] ScanGame: calling ScanOverrides directly on Linux...\n");
+
+            // First pass overrides
+            if (UnrealConfig.ScanOverrides.version_finder)
+                UnrealConfig.ScanOverrides.version_finder(empty_containers, override_result);
+            if (UnrealConfig.ScanOverrides.fname_to_string)
+                UnrealConfig.ScanOverrides.fname_to_string(empty_containers, override_result);
+            if (UnrealConfig.ScanOverrides.static_construct_object)
+                UnrealConfig.ScanOverrides.static_construct_object(empty_containers, override_result);
+            if (UnrealConfig.ScanOverrides.gameengine_tick)
+                UnrealConfig.ScanOverrides.gameengine_tick(empty_containers, override_result);
+            if (UnrealConfig.ScanOverrides.static_find_object)
+                UnrealConfig.ScanOverrides.static_find_object(empty_containers, override_result);
+
+            // Second pass overrides
+            if (UnrealConfig.ScanOverrides.fname_constructor)
+                UnrealConfig.ScanOverrides.fname_constructor(empty_containers, override_result);
+            if (UnrealConfig.ScanOverrides.guobjectarray)
+                UnrealConfig.ScanOverrides.guobjectarray(empty_containers, override_result);
+            if (UnrealConfig.ScanOverrides.fmemory_free)
+                UnrealConfig.ScanOverrides.fmemory_free(empty_containers, override_result);
+            if (UnrealConfig.ScanOverrides.gnatives)
+                UnrealConfig.ScanOverrides.gnatives(empty_containers, override_result);
+            if (UnrealConfig.ScanOverrides.fuobject_hash_tables_get)
+                UnrealConfig.ScanOverrides.fuobject_hash_tables_get(empty_containers, override_result);
+            if (UnrealConfig.ScanOverrides.console_manager_singleton)
+                UnrealConfig.ScanOverrides.console_manager_singleton(empty_containers, override_result);
+            if (UnrealConfig.ScanOverrides.process_local_script_function)
+                UnrealConfig.ScanOverrides.process_local_script_function(empty_containers, override_result);
+            if (UnrealConfig.ScanOverrides.process_internal)
+                UnrealConfig.ScanOverrides.process_internal(empty_containers, override_result);
+            if (UnrealConfig.ScanOverrides.call_function_by_name_with_arguments)
+                UnrealConfig.ScanOverrides.call_function_by_name_with_arguments(empty_containers, override_result);
+            if (UnrealConfig.ScanOverrides.process_event)
+                UnrealConfig.ScanOverrides.process_event(empty_containers, override_result);
+
+            for (const auto& msg : override_result.SuccessMessage)
+            {
+                Output::send(msg);
+            }
+            fprintf(stderr, "[UE4SS] ScanGame: ScanOverrides completed on Linux.\n");
+        }
+#endif
+
         // First pass
         {
             if (ctx.config.engine_version)
