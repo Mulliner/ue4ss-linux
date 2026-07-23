@@ -24,9 +24,13 @@
 #include <cwctype>
 #include <format>
 #include <fstream>
+#include <chrono>
 #include <functional>
 #include <limits>
+#include <thread>
 #include <unordered_set>
+#include <set>
+#include <vector>
 #include <fmt/chrono.h>
 #include <Profiler/Profiler.hpp>
 #include <DynamicOutput/DynamicOutput.hpp>
@@ -990,137 +994,240 @@ namespace RC
 
                     UE4SS_DBG( "[UE4SS] dlsym: GUObjectArray not found (stripped binary?), trying heuristic scan...\n");
 
-                    // Heuristic scan: search writable PT_LOAD segments for FUObjectArray pattern
-                    // FUObjectArray layout (UE5.1):
-                    //   +0x00: int32 ObjFirstGCIndex (0 or small positive)
-                    //   +0x04: int32 ObjLastNonGCIndex (0 or small positive)
-                    //   +0x08: int32 MaxObjectsNotConsideredByGC (0 or small positive)
-                    //   +0x0C: bool OpenForDisregardForGC (0 or 1, padded to 4 bytes)
-                    //   +0x10: TUObjectArray ObjObjects
-                    //     +0x10: FUObjectItem** Objects (valid pointer)
-                    //     +0x18: FUObjectItem* PreAllocatedObjects (0 or valid pointer)
-                    //     +0x20: int32 MaxElements (> 0, reasonable)
-                    //     +0x24: int32 NumElements (> 0, < MaxElements)
-                    //     +0x28: int32 MaxChunks (> 0, small)
-                    //     +0x2C: int32 NumChunks (> 0, <= MaxChunks)
-                    // Total FUObjectArray size: 0xB8
-
                     struct SegmentInfo {
                         uint8_t* start;
                         size_t size;
+                        bool writable;
+                        bool executable;
                     };
-                    std::vector<SegmentInfo> writable_segments;
 
-                    dl_iterate_phdr([](struct dl_phdr_info* info, size_t, void* data) -> int {
-                        auto* segs = static_cast<std::vector<SegmentInfo>*>(data);
-                        // Always include the main executable (first entry with empty name)
-                        // and all loaded shared libraries — GUObjectArray could be in any module's .data/.bss
-                        for (int i = 0; i < info->dlpi_phnum; i++) {
-                            const ElfW(Phdr)* phdr = &info->dlpi_phdr[i];
-                            if (phdr->p_type == PT_LOAD && (phdr->p_flags & PF_W)) {
-                                uint8_t* seg_start = reinterpret_cast<uint8_t*>(info->dlpi_addr + phdr->p_vaddr);
-                                size_t seg_size = phdr->p_memsz;
-                                if (seg_size > 0x100) {
-                                    segs->push_back({seg_start, seg_size});
+                    // Collect segments only from the main executable (first dl_iterate_phdr entry
+                    // with empty dlpi_name, or name matching the game binary).
+                    auto collect_main_exe_segments = []() -> std::vector<SegmentInfo> {
+                        std::vector<SegmentInfo> segs;
+                        std::string main_exe_path;
+                        {
+                            char buf[1024]{};
+                            ssize_t len = readlink("/proc/self/exe", buf, sizeof(buf) - 1);
+                            if (len > 0) main_exe_path = std::string(buf, static_cast<size_t>(len));
+                        }
+
+                        dl_iterate_phdr([](struct dl_phdr_info* info, size_t, void* data) -> int {
+                            auto* segs = static_cast<std::vector<SegmentInfo>*>(data);
+                            const char* name = info->dlpi_name;
+                            // Main executable has empty name or matches /proc/self/exe
+                            bool is_main = (!name || name[0] == '\0');
+                            if (!is_main) {
+                                // Check if this shared library is the game binary itself
+                                // (some systems report the exe path as the name)
+                                std::string nm(name);
+                                if (nm.find("PalServer-Linux-Shipping") != std::string::npos ||
+                                    nm.find("PalServer") != std::string::npos)
+                                {
+                                    is_main = true;
                                 }
                             }
+                            if (!is_main) return 0;
+
+                            for (int i = 0; i < info->dlpi_phnum; i++) {
+                                const ElfW(Phdr)* phdr = &info->dlpi_phdr[i];
+                                if (phdr->p_type == PT_LOAD) {
+                                    uint8_t* seg_start = reinterpret_cast<uint8_t*>(info->dlpi_addr + phdr->p_vaddr);
+                                    size_t seg_size = phdr->p_memsz;
+                                    bool writable = (phdr->p_flags & PF_W) != 0;
+                                    bool executable = (phdr->p_flags & PF_X) != 0;
+                                    if (seg_size > 0x100) {
+                                        segs->push_back({seg_start, seg_size, writable, executable});
+                                    }
+                                }
+                            }
+                            return 0;
+                        }, &segs);
+                        return segs;
+                    };
+
+                    // Real is_readable: parse /proc/self/maps once and cache
+                    struct MapsRange { uintptr_t start; uintptr_t end; };
+                    std::vector<MapsRange> g_maps_ranges;
+                    auto load_maps = [&]() {
+                        g_maps_ranges.clear();
+                        FILE* f = fopen("/proc/self/maps", "r");
+                        if (!f) return;
+                        char line[512];
+                        while (fgets(line, sizeof(line), f)) {
+                            uintptr_t start, end;
+                            if (sscanf(line, "%lx-%lx", &start, &end) == 2) {
+                                g_maps_ranges.push_back({start, end});
+                            }
                         }
-                        return 0;
-                    }, &writable_segments);
+                        fclose(f);
+                    };
+                    auto is_readable = [&](uintptr_t addr, size_t len) -> bool {
+                        if (addr < 0x10000 || addr > 0x7fffffffffff) return false;
+                        uintptr_t end = addr + len;
+                        for (const auto& r : g_maps_ranges) {
+                            if (addr >= r.start && end <= r.end) return true;
+                        }
+                        return false;
+                    };
 
-                    UE4SS_DBG( "[UE4SS] Heuristic scan: found %zu writable segments\n", writable_segments.size());
-
-                    auto validate_fuobjectarray = [](uint8_t* candidate) -> bool {
-                        // Check ObjFirstGCIndex (offset 0x00) - should be 0 or small positive
+                    auto validate_fuobjectarray = [&](uint8_t* candidate) -> bool {
                         int32_t obj_first_gc = *reinterpret_cast<int32_t*>(candidate + 0x00);
                         if (obj_first_gc < 0 || obj_first_gc > 1000000) return false;
 
-                        // Check ObjLastNonGCIndex (offset 0x04) - should be 0 or small positive
                         int32_t obj_last_non_gc = *reinterpret_cast<int32_t*>(candidate + 0x04);
                         if (obj_last_non_gc < 0 || obj_last_non_gc > 1000000) return false;
 
-                        // Check MaxObjectsNotConsideredByGC (offset 0x08) - should be 0 or small positive
                         int32_t max_not_gc = *reinterpret_cast<int32_t*>(candidate + 0x08);
                         if (max_not_gc < 0 || max_not_gc > 1000000) return false;
 
-                        // Check OpenForDisregardForGC (offset 0x0C) - bool, 0 or 1
                         uint8_t open_disregard = *reinterpret_cast<uint8_t*>(candidate + 0x0C);
                         if (open_disregard > 1) return false;
 
-                        // Check TUObjectArray.Objects (offset 0x10) - should be a valid pointer
                         void* objects_ptr = *reinterpret_cast<void**>(candidate + 0x10);
                         if (objects_ptr == nullptr) return false;
-                        // Pointer should be in a reasonable address range
-                        uintptr_t objects_addr = reinterpret_cast<uintptr_t>(objects_ptr);
-                        if (objects_addr < 0x10000 || objects_addr > 0x7fffffffffff) return false;
+                        if (!is_readable(reinterpret_cast<uintptr_t>(objects_ptr), 8)) return false;
 
-                        // Check PreAllocatedObjects (offset 0x18) - 0 or valid pointer
                         void* pre_alloc = *reinterpret_cast<void**>(candidate + 0x18);
                         if (pre_alloc != nullptr) {
-                            uintptr_t pre_alloc_addr = reinterpret_cast<uintptr_t>(pre_alloc);
-                            if (pre_alloc_addr < 0x10000 || pre_alloc_addr > 0x7fffffffffff) return false;
+                            if (!is_readable(reinterpret_cast<uintptr_t>(pre_alloc), 8)) return false;
                         }
 
-                        // Check MaxElements (offset 0x20) - should be > 0 and reasonable
                         int32_t max_elements = *reinterpret_cast<int32_t*>(candidate + 0x20);
                         if (max_elements <= 0 || max_elements > 10000000) return false;
 
-                        // Check NumElements (offset 0x24) - should be > 0 and <= MaxElements
                         int32_t num_elements = *reinterpret_cast<int32_t*>(candidate + 0x24);
-                        if (num_elements <= 0 || num_elements > max_elements) return false;
+                        if (num_elements < 0 || num_elements > max_elements) return false;
 
-                        // Check MaxChunks (offset 0x28) - should be > 0 and reasonable
                         int32_t max_chunks = *reinterpret_cast<int32_t*>(candidate + 0x28);
                         if (max_chunks <= 0 || max_chunks > 10000) return false;
 
-                        // Check NumChunks (offset 0x2C) - should be > 0 and <= MaxChunks
                         int32_t num_chunks = *reinterpret_cast<int32_t*>(candidate + 0x2C);
-                        if (num_chunks <= 0 || num_chunks > max_chunks) return false;
+                        if (num_chunks < 0 || num_chunks > max_chunks) return false;
 
-                        // Additional validation: NumElements should be roughly consistent with NumChunks
-                        // Each chunk holds 64*1024 = 65536 elements
-                        // So NumElements should be <= NumChunks * 65536
-                        // And NumElements should be > (NumChunks - 1) * 65536 (at least partially filled)
-                        if (num_elements > static_cast<int64_t>(num_chunks) * 65536 + 65536) return false;
+                        if (num_chunks > 0 && num_elements > static_cast<int64_t>(num_chunks) * 65536 + 65536) return false;
 
-                        // Secondary validation: dereference Objects[0] and check if it looks like a valid FUObjectItem
-                        // FUObjectItem first field is a pointer to UObject (or SerialNumber for some versions)
-                        // On UE5.1, FUObjectItem layout: { UObject* Object, int32 Flags, int32 SerialNumber, ... }
-                        // Size is 0x18 (UEP_TotalSize from template)
                         Unreal::FUObjectItem** chunks = *reinterpret_cast<Unreal::FUObjectItem***>(candidate + 0x10);
                         if (chunks == nullptr) return false;
-                        // Try to read the first chunk pointer
-                        // This is a pointer to an array of FUObjectItem
-                        // Use volatile read to avoid SIGSEGV on invalid pointers
-                        void* first_chunk = nullptr;
-                        {
-                            // Use mprotect-safe read via /proc/self/mem fallback would be too slow
-                            // Just try to read and rely on the signal handler
-                            first_chunk = *reinterpret_cast<void* volatile*>(chunks);
-                        }
+                        if (!is_readable(reinterpret_cast<uintptr_t>(chunks), 8)) return false;
+
+                        void* first_chunk = *reinterpret_cast<void* volatile*>(chunks);
                         if (first_chunk == nullptr) return false;
-                        uintptr_t first_chunk_addr = reinterpret_cast<uintptr_t>(first_chunk);
-                        if (first_chunk_addr < 0x10000 || first_chunk_addr > 0x7fffffffffff) return false;
+                        if (!is_readable(reinterpret_cast<uintptr_t>(first_chunk), 8)) return false;
 
                         return true;
                     };
 
-                    void* found_addr = nullptr;
-                    for (const auto& seg : writable_segments)
-                    {
-                        // Scan with 8-byte alignment (FUObjectArray is likely aligned)
-                        // Need at least 0xB8 bytes to check the full structure
-                        for (size_t offset = 0; offset + 0xB8 <= seg.size; offset += 8)
-                        {
-                            uint8_t* candidate = seg.start + offset;
-                            if (validate_fuobjectarray(candidate))
-                            {
-                                found_addr = candidate;
-                                UE4SS_DBG( "[UE4SS] Heuristic scan: FUObjectArray candidate found at %p (segment offset 0x%zx)\n", found_addr, offset);
-                                break;
+                    // Code-based scan: find `lea reg, [rip+disp32]` or `mov reg, [rip+disp32]`
+                    // instructions in executable segments that reference addresses in writable
+                    // segments. Then validate those referenced addresses as FUObjectArray.
+                    // This is far more reliable than scanning data blindly.
+                    auto scan_code_refs = [&](std::vector<SegmentInfo>& segs) -> void* {
+                        // Collect writable ranges for quick target check
+                        struct WritableRange { uint8_t* start; uint8_t* end; };
+                        std::vector<WritableRange> writable_ranges;
+                        for (const auto& s : segs) {
+                            if (s.writable) {
+                                writable_ranges.push_back({s.start, s.start + s.size});
                             }
                         }
-                        if (found_addr) break;
+                        auto is_in_writable = [&](uintptr_t addr) -> bool {
+                            for (const auto& wr : writable_ranges) {
+                                if (addr >= reinterpret_cast<uintptr_t>(wr.start) &&
+                                    addr < reinterpret_cast<uintptr_t>(wr.end)) return true;
+                            }
+                            return false;
+                        };
+
+                        std::set<uintptr_t> checked;
+
+                        for (const auto& seg : segs) {
+                            if (!seg.executable) continue;
+                            // Scan for RIP-relative addressing patterns:
+                            // lea reg, [rip+disp32]: 48 8D xx xx xx xx xx (7 bytes)
+                            // mov reg, [rip+disp32]: 48 8B xx xx xx xx xx (7 bytes)
+                            // Also: 4C 8D / 4C 8B for r8-r15
+                            for (size_t offset = 0; offset + 7 < seg.size; offset++) {
+                                uint8_t* p = seg.start + offset;
+                                uint8_t b0 = p[0], b1 = p[1], b2 = p[2];
+
+                                // Check for REX.W prefix (48 or 4C) followed by 8B (mov) or 8D (lea)
+                                // with ModRM byte indicating RIP-relative (mod=00, rm=101 → ModRM & 0xC7 == 0x05)
+                                bool is_lea = (b0 == 0x48 || b0 == 0x4C) && b1 == 0x8D && (b2 & 0xC7) == 0x05;
+                                bool is_mov = (b0 == 0x48 || b0 == 0x4C) && b1 == 0x8B && (b2 & 0xC7) == 0x05;
+
+                                if (!is_lea && !is_mov) continue;
+
+                                // disp32 is at p+3 (little-endian)
+                                int32_t disp = *reinterpret_cast<int32_t*>(p + 3);
+                                // RIP-relative: target = next_instruction_addr + disp
+                                // next_instruction_addr = p + 7
+                                uintptr_t target = reinterpret_cast<uintptr_t>(p + 7) + disp;
+
+                                if (!is_in_writable(target)) continue;
+                                if (checked.count(target)) continue;
+                                checked.insert(target);
+
+                                UE4SS_DBG("[UE4SS] Code scan: RIP-relative ref at %p -> %p (disp=%d)\n",
+                                          p, reinterpret_cast<void*>(target), disp);
+
+                                if (validate_fuobjectarray(reinterpret_cast<uint8_t*>(target))) {
+                                    return reinterpret_cast<void*>(target);
+                                }
+                            }
+                        }
+                        return nullptr;
+                    };
+
+                    void* found_addr = nullptr;
+                    constexpr int MAX_RETRIES = 60;
+                    constexpr int RETRY_DELAY_MS = 500;
+
+                    for (int attempt = 0; attempt < MAX_RETRIES && !found_addr; attempt++)
+                    {
+                        if (attempt > 0)
+                        {
+                            UE4SS_DBG( "[UE4SS] Heuristic scan: retry %d/%d (waiting %dms for engine to initialize GUObjectArray)...\n", attempt, MAX_RETRIES, RETRY_DELAY_MS);
+                            std::this_thread::sleep_for(std::chrono::milliseconds(RETRY_DELAY_MS));
+                        }
+
+                        load_maps();
+                        auto segments = collect_main_exe_segments();
+                        if (attempt == 0)
+                        {
+                            UE4SS_DBG( "[UE4SS] Heuristic scan: found %zu segments in main executable\n", segments.size());
+                        }
+
+                        // Phase 1: Code-based scan (find RIP-relative refs to writable data)
+                        if (attempt == 0)
+                        {
+                            UE4SS_DBG( "[UE4SS] Heuristic scan: starting code-based scan...\n");
+                        }
+                        found_addr = scan_code_refs(segments);
+
+                        // Phase 2: Data-based scan (fallback: scan writable segments directly)
+                        if (!found_addr)
+                        {
+                            if (attempt == 0)
+                            {
+                                UE4SS_DBG( "[UE4SS] Heuristic scan: code scan found nothing, trying data scan...\n");
+                            }
+                            for (const auto& seg : segments)
+                            {
+                                if (!seg.writable) continue;
+                                for (size_t offset = 0; offset + 0xB8 <= seg.size; offset += 8)
+                                {
+                                    uint8_t* candidate = seg.start + offset;
+                                    if (validate_fuobjectarray(candidate))
+                                    {
+                                        found_addr = candidate;
+                                        UE4SS_DBG( "[UE4SS] Heuristic scan: FUObjectArray candidate found at %p (segment offset 0x%zx, attempt %d)\n", found_addr, offset, attempt);
+                                        break;
+                                    }
+                                }
+                                if (found_addr) break;
+                            }
+                        }
                     }
 
                     if (found_addr)
@@ -1131,7 +1238,7 @@ namespace RC
                     }
                     else
                     {
-                        UE4SS_DBG( "[UE4SS] Heuristic scan: GUObjectArray not found in any writable segment\n");
+                        UE4SS_DBG( "[UE4SS] Heuristic scan: GUObjectArray not found after %d attempts\n", MAX_RETRIES);
                     }
                 };
 
@@ -2248,7 +2355,9 @@ namespace RC
                     }
                 }
 
-                dlclose(main_exe);
+                // Intentionally NOT calling dlclose(main_exe) — the handle is captured by
+                // try_resolve lambdas which are called later during ScanGame(). dlopen(nullptr)
+                // returns a pseudo-handle for the main executable that is never unloaded anyway.
             }
 
             UE4SS_DBG( "[UE4SS] Linux scan overrides configured (UE5.1, dlsym-based)\n");
