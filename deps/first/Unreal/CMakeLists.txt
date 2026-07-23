@@ -82,6 +82,10 @@ if(WIN32)
     target_link_libraries(${TARGET} PUBLIC PolyHook_2 ASMHelper)
 else()
     target_link_libraries(${TARGET} PUBLIC ASMHelper funchook)
+    # Ensure funchook headers are findable even if funchook target doesn't propagate include dirs
+    if(DEFINED funchook_SOURCE_DIR)
+        target_include_directories(${TARGET} PUBLIC ${funchook_SOURCE_DIR}/include)
+    endif()
 endif()
 
 # Add natvis file for Visual Studio debugging (works with MSVC and clang-cl)

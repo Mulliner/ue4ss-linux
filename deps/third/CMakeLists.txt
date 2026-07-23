@@ -94,11 +94,15 @@ else()
     FetchContent_MakeAvailable(funchook)
     suppress_third_party_warnings(funchook)
     # funchook's CMake doesn't always propagate include dirs properly via FetchContent
-    if(TARGET funchook)
-        target_include_directories(funchook PUBLIC ${funchook_SOURCE_DIR}/include)
-    endif()
+    # Add include dir to both possible target names
     if(TARGET funchook-static)
         target_include_directories(funchook-static PUBLIC ${funchook_SOURCE_DIR}/include)
+        # Create an alias so consumers can use 'funchook' as target name
+        if(NOT TARGET funchook)
+            add_library(funchook ALIAS funchook-static)
+        endif()
+    elseif(TARGET funchook)
+        target_include_directories(funchook PUBLIC ${funchook_SOURCE_DIR}/include)
     endif()
 endif()
 

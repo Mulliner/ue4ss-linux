@@ -173,6 +173,9 @@ else()
         dl
         pthread
     )
+    if(DEFINED funchook_SOURCE_DIR)
+        target_include_directories(UE4SS PUBLIC ${funchook_SOURCE_DIR}/include)
+    endif()
     if(UE4SS_GUI_ENABLED)
         target_link_libraries(UE4SS PUBLIC ImGui glfw glad)
         find_package(OpenGL REQUIRED)
