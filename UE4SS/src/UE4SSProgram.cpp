@@ -223,9 +223,9 @@ namespace RC
 #endif // _WIN32
 
 #ifndef _WIN32
-    static void* (*dlopen_hooked)(const char* filename, int flag) = nullptr;
+    void* (*dlopen_hooked)(const char* filename, int flag) = nullptr;
 
-    static void* HookedDlopen(const char* filename, int flag)
+    void* HookedDlopen(const char* filename, int flag)
     {
         void* result = dlopen_hooked(filename, flag);
         if (filename && result)
