@@ -16,6 +16,7 @@
 #else
 #include <unistd.h>
 #include <dlfcn.h>
+#include <funchook.h>
 #endif
 
 #include <algorithm>
@@ -220,6 +221,21 @@ namespace RC
         return lib;
     }
 #endif // _WIN32
+
+#ifndef _WIN32
+    static void* (*dlopen_hooked)(const char* filename, int flag) = nullptr;
+
+    static void* HookedDlopen(const char* filename, int flag)
+    {
+        void* result = dlopen_hooked(filename, flag);
+        if (filename && result)
+        {
+            UE4SSProgram& program = UE4SSProgram::get_program();
+            program.fire_lib_load_for_cpp_mods(ensure_str(filename));
+        }
+        return result;
+    }
+#endif
 
     UE4SSProgram::UE4SSProgram(const std::filesystem::path& moduleFilePath, std::initializer_list<BinaryOptions> options) : MProgram(options)
     {
@@ -534,6 +550,20 @@ namespace RC
                                                                       L"");
             m_load_library_ex_w_hook->hook();
 #endif // _WIN32
+#ifndef _WIN32
+            // Hook dlopen on Linux to notify C++ mods of library loads
+            dlopen_hooked = reinterpret_cast<void* (*)(const char*, int)>(dlsym(RTLD_NEXT, "dlopen"));
+            if (dlopen_hooked)
+            {
+                m_dlopen_hook_handle = funchook_create();
+                if (m_dlopen_hook_handle)
+                {
+                    auto target = reinterpret_cast<void*>(&dlopen_hooked);
+                    funchook_prepare(m_dlopen_hook_handle, &target, reinterpret_cast<void*>(&HookedDlopen));
+                    funchook_install(m_dlopen_hook_handle, 0);
+                }
+            }
+#endif
 
             UE4SS_DBG( "[UE4SS] Calling SetupUnrealModules()...\n");
             Unreal::UnrealInitializer::SetupUnrealModules();
@@ -608,6 +638,16 @@ namespace RC
     {
         // Shut down the event loop
         m_processing_events = false;
+
+#ifndef _WIN32
+        // Uninstall dlopen hook on Linux
+        if (m_dlopen_hook_handle)
+        {
+            funchook_uninstall(reinterpret_cast<funchook_t*>(m_dlopen_hook_handle), 0);
+            funchook_destroy(reinterpret_cast<funchook_t*>(m_dlopen_hook_handle));
+            m_dlopen_hook_handle = nullptr;
+        }
+#endif
 
         // It's possible that main() will destroy the default devices (they are static)
         // However it's also possible that this program object is constructed in a context where main() is not gonna immediately exit

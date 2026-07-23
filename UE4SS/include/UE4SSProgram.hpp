@@ -171,6 +171,10 @@ namespace RC
 
         std::unique_ptr<PLH::IatHook> m_load_library_ex_w_hook;
         uint64_t m_hook_trampoline_load_library_ex_w;
+#else
+        // Linux: hook dlopen via funchook to notify C++ mods of library loads
+        void* m_dlopen_hook_handle = nullptr; // funchook_t*
+        void* (*m_dlopen_trampoline)(const char* filename, int flag) = nullptr;
 #endif
 
       public:
