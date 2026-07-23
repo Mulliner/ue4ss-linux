@@ -1,6 +1,6 @@
 // ===========================================================================
 // UE4SS Linux Native Port
-// Copyright (c) 2024-2026 rl-dev.de (https://rl-dev.de)
+// Copyright (c) 2026 rl-dev.de (https://rl-dev.de)
 // Based on RE-UE4SS by UE4SS-RE (https://github.com/UE4SS-RE/RE-UE4SS)
 // Linux port originally by calebm02 (https://github.com/calebm02/RE-UE4SS-Linux)
 //
@@ -45,7 +45,7 @@ static constexpr const char* COPYRIGHT_BANNER =
     "\n"
     "========================================\n"
     " UE4SS Linux Native Port\n"
-    " Copyright (c) 2024-2026 rl-dev.de\n"
+    " Copyright (c) 2026 Robin Oliver Lucas\n"
     " https://rl-dev.de\n"
     "\n"
     " Based on RE-UE4SS by UE4SS-RE\n"
@@ -241,7 +241,7 @@ static auto thread_dll_start() -> void
         {
             UE4SS_ERR("[UE4SS] WARNING: Copyright verification failed. This binary may have been tampered with.\n");
             UE4SS_ERR("[UE4SS] Original source: https://github.com/XarminaEu/ue4ss-linux\n");
-            UE4SS_ERR("[UE4SS] Copyright (c) 2026 rl-dev.de — https://rl-dev.de\n");
+            UE4SS_ERR("[UE4SS] Copyright (c) 2026 Robin Oliver Lucas — https://rl-dev.de\n");
         }
 
         wait_for_game_ready();
