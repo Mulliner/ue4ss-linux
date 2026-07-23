@@ -3269,7 +3269,21 @@ namespace RC
                     if (!find_mod_by_name<LuaMod>(mod_name) && is_lua_mod)
                         m_mods.emplace_back(std::make_unique<LuaMod>(*this, std::move(mod_name), ensure_str(sub_directory.path())));
                     if (!find_mod_by_name<CppMod>(mod_name) && is_cpp_mod)
+                    {
+#ifdef __linux__
+                        StringType saved_mod_name = mod_name;
+                        auto saved_mod_path = ensure_str(sub_directory.path());
+                        bool ok = ue4ss_with_crash_recovery([&]() {
+                            m_mods.emplace_back(std::make_unique<CppMod>(*this, std::move(saved_mod_name), std::move(saved_mod_path)));
+                        });
+                        if (!ok)
+                        {
+                            Output::send<LogLevel::Warning>(STR("C++ mod '{}' crashed during construction (dlopen), skipping.\n"), ensure_str(mod_name));
+                        }
+#else
                         m_mods.emplace_back(std::make_unique<CppMod>(*this, std::move(mod_name), ensure_str(sub_directory.path())));
+#endif
+                    }
                 }
             }
         }
