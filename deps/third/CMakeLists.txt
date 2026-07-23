@@ -80,6 +80,19 @@ if(WIN32)
         GIT_PROGRESS ON
     )
     add_subdirectory("raw_pdb")
+else()
+    # funchook (Linux hooking library - replaces PolyHook2)
+    FetchContent_Declare(
+        funchook
+        GIT_REPOSITORY https://github.com/kubo/funchook.git
+        GIT_TAG v1.1.3
+        GIT_SHALLOW TRUE
+        GIT_PROGRESS ON
+    )
+    set(FUNCHOOK_BUILD_SHARED OFF CACHE BOOL "Build funchook as static" FORCE)
+    set(FUNCHOOK_BUILD_TESTS OFF CACHE BOOL "Build funchook tests" FORCE)
+    FetchContent_MakeAvailable(funchook)
+    suppress_third_party_warnings(funchook)
 endif()
 
 # Corrosion (Rust integration) - enables patternsleuth AOB signature scanning

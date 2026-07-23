@@ -10,6 +10,8 @@
 #define NOMINMAX
 #ifdef _WIN32
 #include <Windows.h>
+#else
+#include <unistd.h>
 #endif
 
 namespace RC::Unreal
@@ -40,7 +42,17 @@ namespace RC::Unreal
         }
         return need_to_apply_patch;
 #else
-        return false;
+        char exe_path[1024];
+        ssize_t len = readlink("/proc/self/exe", exe_path, sizeof(exe_path) - 1);
+        if (len <= 0) return false;
+        exe_path[len] = '\0';
+        auto exe_absolute_path = std::filesystem::path{exe_path};
+        auto need_to_apply_patch = exe_absolute_path.filename() == "KINGDOM HEARTS III";
+        if (need_to_apply_patch)
+        {
+            Output::send<LogLevel::Verbose>(STR("Detected Kingdom Hearts 3, applying InternalIndex patch.\n"));
+        }
+        return need_to_apply_patch;
 #endif
     }
 

@@ -10,6 +10,10 @@
 #ifdef _WIN32
 #include <Unreal/Core/Windows/WindowsHWrapper.hpp>
 #include <psapi.h>
+#else
+#include <sys/sysinfo.h>
+#include <fstream>
+#include <unistd.h>
 #endif
 #include <Unreal/Hooks.hpp>
 
@@ -65,7 +69,11 @@ namespace RC::Unreal
         GlobalMemoryStatusEx(&StateX);
         return StateX.dwMemoryLoad;
 #else
-        // On Linux, return a low value to effectively disable the memory check
+        struct sysinfo info;
+        if (sysinfo(&info) == 0)
+        {
+            return static_cast<size_t>(info.totalram * info.mem_unit) / (1024 * 1024);
+        }
         return 0;
 #endif
     }
@@ -108,6 +116,14 @@ namespace RC::Unreal
                 if (GetProcessMemoryInfo(GetCurrentProcess(), &MemoryCounters, sizeof(MemoryCounters)))
                 {
                     MemUsageInMegabytes = MemoryCounters.WorkingSetSize / megabyte;
+                }
+#else
+                std::ifstream statm("/proc/self/statm");
+                if (statm.is_open())
+                {
+                    unsigned long total_pages = 0;
+                    statm >> total_pages;
+                    MemUsageInMegabytes = (total_pages * sysconf(_SC_PAGESIZE)) / megabyte;
                 }
 #endif
 

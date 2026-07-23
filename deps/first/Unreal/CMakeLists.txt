@@ -12,7 +12,6 @@ file(GLOB_RECURSE GENERATED_SOURCES generated_src/**.cpp)
 if(NOT WIN32)
     list(FILTER SOURCES EXCLUDE REGEX "/Microsoft/")
     list(FILTER SOURCES EXCLUDE REGEX "/Windows/")
-    list(FILTER SOURCES EXCLUDE REGEX "ASMHelper")
 endif()
 
 set(${TARGET}_Sources
@@ -81,6 +80,8 @@ endif()
 target_link_libraries(${TARGET} PUBLIC fmt File DynamicOutput SinglePassSigScanner Constructs Helpers Function)
 if(WIN32)
     target_link_libraries(${TARGET} PUBLIC PolyHook_2 ASMHelper)
+else()
+    target_link_libraries(${TARGET} PUBLIC ASMHelper funchook)
 endif()
 
 # Add natvis file for Visual Studio debugging (works with MSVC and clang-cl)

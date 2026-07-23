@@ -12,9 +12,7 @@
 #include <File/File.hpp>
 #include <Helpers/ASM.hpp>
 #include <Helpers/Casting.hpp>
-#ifdef _WIN32
 #include <ASMHelper/ASMHelper.hpp>
-#endif
 
 namespace RC::Unreal::Signatures
 {

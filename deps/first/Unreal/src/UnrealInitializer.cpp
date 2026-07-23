@@ -24,9 +24,9 @@
 #include <Unreal/Searcher/ObjectSearcher.hpp>
 #include <Unreal/ClassListener.hpp>
 #include <Unreal/UGameViewportClient.hpp>
-#ifdef _WIN32
 #include <Zydis/Zydis.h>
-
+#include <ASMHelper/ASMHelper.hpp>
+#ifdef _WIN32
 #define NOMINMAX
 #include <Windows.h>
 #include <Psapi.h>
@@ -1205,7 +1205,6 @@ namespace RC::Unreal::UnrealInitializer
                 }
                 else
                 {
-#ifdef _WIN32
                     int CallCount{};
                     auto Data = std::bit_cast<ZyanU8*>(process_internal_addr);
                     ZydisDecoder Decoder;
@@ -1235,7 +1234,6 @@ namespace RC::Unreal::UnrealInitializer
                         Offset += Instruction.length;
                         RuntimeAddress += Instruction.length;
                     }
-#endif
                 }
             }
             } // end else (ExecuteUbergraphFunction found)

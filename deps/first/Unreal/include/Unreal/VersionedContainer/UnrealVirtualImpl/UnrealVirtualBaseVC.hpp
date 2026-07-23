@@ -2,10 +2,8 @@
 
 #include <bit>
 
-#ifdef _WIN32
 #include <ASMHelper/ASMHelper.hpp>
 #include <Zydis/Zydis.h>
-#endif
 
 #define PARAMS(...) __VA_ARGS__
 #define ARGS(...)  __VA_ARGS__
@@ -25,11 +23,7 @@ static MemberFuncPtr bit_cast_mfp(void* ptr) {
 #endif
 
 // Helper to resolve function address from potential JMP instruction
-#ifdef _WIN32
 #define RESOLVE_JMP(ptr) ASM::resolve_function_address_from_potential_jmp(ptr)
-#else
-#define RESOLVE_JMP(ptr) (ptr)
-#endif
 
 #define IMPLEMENT_UNREAL_VIRTUAL_WRAPPER_NO_PARAMS(class_name, function_name, return_type) \
 static const auto offset = []() { \

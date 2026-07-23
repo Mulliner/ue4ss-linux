@@ -6,6 +6,8 @@
 #include <Unreal/Hooks/Internal/ProcessEventProfiler.hpp>
 
 #include <chrono>
+#include <Zydis/Zydis.h>
+#include <ASMHelper/ASMHelper.hpp>
 #ifdef _WIN32
 #include <polyhook2/ZydisDisassembler.hpp>
 #include <Unreal/Core/Windows/WindowsHWrapper.hpp>
@@ -75,7 +77,6 @@ namespace RC::Unreal::Hook::Internal
                     Output::send<LogLevel::Warning>(STR("[{}] Cannot retrieve CallFunctionByNameWithArguments because ProcessConsoleExec is not available.\n"), DetourName);
                     return false;
                 }
-#ifdef _WIN32
                 auto ProcessConsoleExec = UObject::ProcessConsoleExecInternal.get_function_address();
                 int CallCount{};
                 auto Data = std::bit_cast<ZyanU8*>(ProcessConsoleExec);
@@ -102,7 +103,6 @@ namespace RC::Unreal::Hook::Internal
                     Offset += Instruction.length;
                     RuntimeAddress += Instruction.length;
                 }
-#endif
             }
 
             if(!TargetFunction->is_ready()) 
@@ -153,38 +153,36 @@ namespace RC::Unreal::Hook::Internal
 
             auto VTable = std::bit_cast<std::byte*>(*std::bit_cast<std::byte**>(LocalPlayer + UnrealInitializer::StaticStorage::GlobalConfig.FExecVTableOffsetInLocalPlayer));
             auto Func = *std::bit_cast<void**>(VTable + 0x8);
-#ifdef _WIN32
-            auto Data = std::bit_cast<ZyanU8*>(Func);
-            ZydisDecoder Decoder;
-            ZydisDecoderInit(&Decoder, ZYDIS_MACHINE_MODE_LONG_64, ZYDIS_STACK_WIDTH_64);
-            ZyanU64 RuntimeAddress = std::bit_cast<ZyanU64>(Func);
-            ZyanUSize Offset = 0;
-            const ZyanUSize NumBytesToDecode = 8;
-            ZydisDecodedInstruction Instruction;
-            ZydisDecodedOperand Operands[10]{};
-            while (ZYAN_SUCCESS(ZydisDecoderDecodeFull(&Decoder, Data + Offset, NumBytesToDecode - Offset, &Instruction, Operands)))
             {
-                if (Instruction.mnemonic == ZYDIS_MNEMONIC_JMP)
+                auto Data = std::bit_cast<ZyanU8*>(Func);
+                ZydisDecoder Decoder;
+                ZydisDecoderInit(&Decoder, ZYDIS_MACHINE_MODE_LONG_64, ZYDIS_STACK_WIDTH_64);
+                ZyanU64 RuntimeAddress = std::bit_cast<ZyanU64>(Func);
+                ZyanUSize Offset = 0;
+                const ZyanUSize NumBytesToDecode = 8;
+                ZydisDecodedInstruction Instruction;
+                ZydisDecodedOperand Operands[10]{};
+                while (ZYAN_SUCCESS(ZydisDecoderDecodeFull(&Decoder, Data + Offset, NumBytesToDecode - Offset, &Instruction, Operands)))
                 {
-                    ZyanU64 ResultAddress{};
-                    if (ZYAN_SUCCESS(ZydisCalcAbsoluteAddress(&Instruction, &Operands[0], RuntimeAddress, &ResultAddress)))
+                    if (Instruction.mnemonic == ZYDIS_MNEMONIC_JMP)
                     {
-                        TargetFunction->assign_address(std::bit_cast<void*>(ResultAddress));
+                        ZyanU64 ResultAddress{};
+                        if (ZYAN_SUCCESS(ZydisCalcAbsoluteAddress(&Instruction, &Operands[0], RuntimeAddress, &ResultAddress)))
+                        {
+                            TargetFunction->assign_address(std::bit_cast<void*>(ResultAddress));
+                        }
+                        else
+                        {
+                            Output::send<LogLevel::Warning>(STR("Tried to hook ULocalPlayer::Exec but was unable to resolve JMP instruction.\n"));
+                        }
                     }
                     else
                     {
-                        Output::send<LogLevel::Warning>(STR("Tried to hook ULocalPlayer::Exec but was unable to resolve JMP instruction.\n"));
+                        TargetFunction->assign_address(std::bit_cast<void*>(Func));
                     }
+                    break;
                 }
-                else
-                {
-                    TargetFunction->assign_address(std::bit_cast<void*>(Func));
-                }
-                break;
             }
-#else
-            TargetFunction->assign_address(Func);
-#endif
 
             return Base::InstallHook();
         }
