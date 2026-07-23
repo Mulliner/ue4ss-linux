@@ -93,6 +93,13 @@ else()
     set(FUNCHOOK_BUILD_TESTS OFF CACHE BOOL "Build funchook tests" FORCE)
     FetchContent_MakeAvailable(funchook)
     suppress_third_party_warnings(funchook)
+    # funchook's CMake doesn't always propagate include dirs properly via FetchContent
+    if(TARGET funchook)
+        target_include_directories(funchook PUBLIC ${funchook_SOURCE_DIR}/include)
+    endif()
+    if(TARGET funchook-static)
+        target_include_directories(funchook-static PUBLIC ${funchook_SOURCE_DIR}/include)
+    endif()
 endif()
 
 # Corrosion (Rust integration) - enables patternsleuth AOB signature scanning
