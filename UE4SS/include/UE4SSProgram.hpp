@@ -7,6 +7,12 @@
 #include <string_view>
 #include <thread>
 
+#ifndef _WIN32
+// Forward declare funchook_t for Linux dlopen hooking
+struct funchook;
+typedef struct funchook funchook_t;
+#endif
+
 #include <Common.hpp>
 #include <CrashDumper.hpp>
 #include <DynamicOutput/DynamicOutput.hpp>
@@ -173,7 +179,7 @@ namespace RC
         uint64_t m_hook_trampoline_load_library_ex_w;
 #else
         // Linux: hook dlopen via funchook to notify C++ mods of library loads
-        void* m_dlopen_hook_handle = nullptr; // funchook_t*
+        funchook_t* m_dlopen_hook_handle = nullptr;
         void* (*m_dlopen_trampoline)(const char* filename, int flag) = nullptr;
 #endif
 
@@ -388,6 +394,7 @@ namespace RC
         friend void* HookedLoadLibraryExA(const char* lib_name, void* file, int32_t flags);
         friend void* HookedLoadLibraryW(const wchar_t* lib_name);
         friend void* HookedLoadLibraryExW(const wchar_t* lib_name, void* file, int32_t flags);
+        friend void* HookedDlopen(const char* filename, int flag);
         friend auto gui_render_thread_tick() -> void;
     };
 } // namespace RC

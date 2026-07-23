@@ -643,8 +643,8 @@ namespace RC
         // Uninstall dlopen hook on Linux
         if (m_dlopen_hook_handle)
         {
-            funchook_uninstall(reinterpret_cast<funchook_t*>(m_dlopen_hook_handle), 0);
-            funchook_destroy(reinterpret_cast<funchook_t*>(m_dlopen_hook_handle));
+            funchook_uninstall(m_dlopen_hook_handle, 0);
+            funchook_destroy(m_dlopen_hook_handle);
             m_dlopen_hook_handle = nullptr;
         }
 #endif
