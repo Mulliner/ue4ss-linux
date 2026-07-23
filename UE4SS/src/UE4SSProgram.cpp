@@ -963,26 +963,24 @@ namespace RC
             }
             config.ScanOverrides.version_finder = [&]([[maybe_unused]] auto&, Unreal::Signatures::ScanResult&) {};
 
-            // Try to find functions via dlsym from the main executable
-            void* main_exe = dlopen(nullptr, RTLD_NOW);
-            if (main_exe)
-            {
-                auto try_resolve = [&](const char* symbol_name) -> void* {
-                    // Try various mangled name patterns
-                    void* ptr = dlsym(main_exe, symbol_name);
-                    if (ptr) return ptr;
+            // Try to find functions via dlsym from the main executable.
+            // Use RTLD_DEFAULT instead of dlopen(nullptr, ...) because a crashed dlopen
+            // (e.g. from a C++ mod constructor) can leave dlopen's internal state corrupted,
+            // making subsequent dlopen calls crash.
+            auto try_resolve = [&](const char* symbol_name) -> void* {
+                void* ptr = dlsym(RTLD_DEFAULT, symbol_name);
+                if (ptr) return ptr;
 
-                    // Try with leading underscore (C linkage)
-                    std::string prefixed = std::string("_") + symbol_name;
-                    ptr = dlsym(main_exe, prefixed.c_str());
-                    return ptr;
-                };
+                std::string prefixed = std::string("_") + symbol_name;
+                ptr = dlsym(RTLD_DEFAULT, prefixed.c_str());
+                return ptr;
+            };
 
-                // All overrides are non-fatal — the binary is likely stripped so dlsym won't find symbols.
-                // The important thing is that ps_scan returns true (because all config flags are false)
-                // so we don't get stuck in the scan retry loop.
+            // All overrides are non-fatal — the binary is likely stripped so dlsym won't find symbols.
+            // The important thing is that ps_scan returns true (because all config flags are false)
+            // so we don't get stuck in the scan retry loop.
 
-                // Override GUObjectArray scan
+            // Override GUObjectArray scan
                 config.ScanOverrides.guobjectarray = [&](std::vector<SignatureContainer>&, Unreal::Signatures::ScanResult& scan_result) {
                     void* addr = try_resolve("GUObjectArray");
                     if (addr)
@@ -2354,11 +2352,6 @@ namespace RC
                         }
                     }
                 }
-
-                // Intentionally NOT calling dlclose(main_exe) — the handle is captured by
-                // try_resolve lambdas which are called later during ScanGame(). dlopen(nullptr)
-                // returns a pseudo-handle for the main executable that is never unloaded anyway.
-            }
 
             UE4SS_DBG( "[UE4SS] Linux scan overrides configured (UE5.1, dlsym-based)\n");
         }
