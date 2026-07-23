@@ -2667,6 +2667,14 @@ namespace RC
         });
 #endif
 
+#ifdef __linux__
+        if (!Unreal::GUObjectArray)
+        {
+            UE4SS_DBG("[UE4SS] Linux: GUObjectArray not resolved, skipping post-setup_unreal init (output_all_member_offsets, fire_unreal_init, setup_unreal_properties, event loop)\n");
+            return;
+        }
+#endif
+
         output_all_member_offsets(IsCoalesced::Yes);
 
         bool can_create_custom_events{true};

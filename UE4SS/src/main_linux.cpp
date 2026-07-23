@@ -36,6 +36,7 @@
 using namespace RC;
 
 static std::atomic<bool> s_ue4ss_initialized{false};
+static std::atomic<bool> s_banner_printed{false};
 static UE4SSProgram* s_program = nullptr;
 
 // ===========================================================================
@@ -233,8 +234,11 @@ static auto thread_dll_start() -> void
             return;
         }
 
-        // Print copyright banner only for the actual game process
-        UE4SS_LOG("%s\n", COPYRIGHT_BANNER);
+        // Print copyright banner only once per process, and only for the actual game process
+        if (!s_banner_printed.exchange(true))
+        {
+            UE4SS_LOG("%s\n", COPYRIGHT_BANNER);
+        }
 
         // Anti-tamper check
         if (!verify_copyright())
