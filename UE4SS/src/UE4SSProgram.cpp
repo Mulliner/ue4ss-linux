@@ -1166,10 +1166,9 @@ namespace RC
                                 if (checked.count(target)) continue;
                                 checked.insert(target);
 
-                                UE4SS_DBG("[UE4SS] Code scan: RIP-relative ref at %p -> %p (disp=%d)\n",
-                                          p, reinterpret_cast<void*>(target), disp);
-
                                 if (validate_fuobjectarray(reinterpret_cast<uint8_t*>(target))) {
+                                    UE4SS_DBG("[UE4SS] Code scan: valid GUObjectArray at %p (from ref at %p)\n",
+                                              reinterpret_cast<void*>(target), p);
                                     return reinterpret_cast<void*>(target);
                                 }
                             }
