@@ -1014,13 +1014,14 @@ namespace RC
                                 // Check if this shared library is the game binary itself
                                 // (some systems report the exe path as the name)
                                 std::string nm(name);
-                                if (nm.find("PalServer-Linux-Shipping") != std::string::npos ||
-                                    nm.find("PalServer") != std::string::npos)
+                                if (nm.find("PalServer-Linux-Shipping") != std::string::npos)
                                 {
                                     is_main = true;
                                 }
                             }
                             if (!is_main) return 0;
+                            UE4SS_DBG("[UE4SS] collect_main_exe_segments: dlpi_name='%s', dlpi_addr=%p\n",
+                                      name ? name : "(null)", (void*)info->dlpi_addr);
 
                             for (int i = 0; i < info->dlpi_phnum; i++) {
                                 const ElfW(Phdr)* phdr = &info->dlpi_phdr[i];
@@ -1694,15 +1695,15 @@ namespace RC
 
                         dl_iterate_phdr([](struct dl_phdr_info* info, size_t, void* data) -> int {
                             auto* segs = static_cast<std::vector<ExecSegment>*>(data);
-                            // Only scan the main executable (dlpi_name == "" or ends with "PalServer-Linux-Shipping")
-                            if (info->dlpi_name[0] != '\0') {
-                                const char* name = info->dlpi_name;
-                                size_t len = strlen(name);
-                                if (len < 5 || strcmp(name + len - 5, "pping") != 0) {
-                                    // Also check for empty name (main executable)
-                                    if (info->dlpi_name[0] != '\0') return 0;
-                                }
+                            // Only scan the main executable
+                            const char* name = info->dlpi_name;
+                            bool is_main = (!name || name[0] == '\0');
+                            if (!is_main) {
+                                std::string nm(name);
+                                if (nm.find("PalServer-Linux-Shipping") != std::string::npos)
+                                    is_main = true;
                             }
+                            if (!is_main) return 0;
                             for (int i = 0; i < info->dlpi_phnum; i++) {
                                 const ElfW(Phdr)* phdr = &info->dlpi_phdr[i];
                                 if (phdr->p_type == PT_LOAD && (phdr->p_flags & PF_X)) {
