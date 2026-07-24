@@ -1735,6 +1735,12 @@ namespace RC
                         const uint8_t pattern3[] = { 0x48, 0x89, 0xF3, 0x48, 0x89, 0xD6, 0xE8 };
                         // Pattern 4: mov rdi, rsi; mov rsi, rdx; call (no save, direct pass)
                         const uint8_t pattern4[] = { 0x48, 0x89, 0xF7, 0x48, 0x89, 0xD6, 0xE8 };
+                        // Pattern 5 (fallback): mov rbx, rdi; mov rdi, rsi; call (old pattern,
+                        // may match accessor but better than nothing on stripped binaries)
+                        const uint8_t pattern5[] = { 0x48, 0x89, 0xFB, 0x48, 0x89, 0xF7, 0xE8 };
+                        // Pattern 6: mov rdi, rsi; mov rdx, rdx (nop); call — just mov rdi,rsi near a call
+                        // Try: 49 89 F0 48 89 F7 E8 (mov r8, rsi; mov rdi, rsi; call) — uncommon but possible
+                        const uint8_t pattern6[] = { 0x49, 0x89, 0xF0, 0x48, 0x89, 0xF7, 0xE8 };
 
                         struct AOBPattern { const uint8_t* bytes; size_t len; const char* name; };
                         AOBPattern patterns[] = {
@@ -1742,6 +1748,8 @@ namespace RC
                             { pattern2, sizeof(pattern2), "mov rbp,rsi; mov rdi,rdx; call" },
                             { pattern3, sizeof(pattern3), "mov rbx,rsi; mov rsi,rdx; call" },
                             { pattern4, sizeof(pattern4), "mov rdi,rsi; mov rsi,rdx; call" },
+                            { pattern5, sizeof(pattern5), "mov rbx,rdi; mov rdi,rsi; call (fallback)" },
+                            { pattern6, sizeof(pattern6), "mov r8,rsi; mov rdi,rsi; call" },
                         };
                         // Look for this pattern a few bytes before the actual function start
                         // (after the prologue saves). We scan backwards from the pattern match
@@ -1755,7 +1763,7 @@ namespace RC
                             {
                                 // Try each pattern
                                 int matched_pattern = -1;
-                                for (int p = 0; p < 4; p++)
+                                for (int p = 0; p < 6; p++)
                                 {
                                     if (offset + patterns[p].len <= seg.size &&
                                         memcmp(seg.start + offset, patterns[p].bytes, patterns[p].len) == 0)
