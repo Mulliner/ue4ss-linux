@@ -1090,7 +1090,7 @@ namespace RC
                         if (max_elements <= 0 || max_elements > 10000000) return false;
 
                         int32_t num_elements = *reinterpret_cast<int32_t*>(candidate + 0x24);
-                        if (num_elements <= 0 || num_elements > max_elements) return false;
+                        if (num_elements < 100 || num_elements > max_elements) return false;
 
                         int32_t max_chunks = *reinterpret_cast<int32_t*>(candidate + 0x28);
                         if (max_chunks <= 0 || max_chunks > 10000) return false;
@@ -1106,7 +1106,12 @@ namespace RC
 
                         void* first_chunk = *reinterpret_cast<void* volatile*>(chunks);
                         if (first_chunk == nullptr) return false;
-                        if (!is_readable(reinterpret_cast<uintptr_t>(first_chunk), 8)) return false;
+                        if (!is_readable(reinterpret_cast<uintptr_t>(first_chunk), 64)) return false;
+
+                        // Verify first element in first chunk looks like a UObject pointer
+                        void* first_obj = *reinterpret_cast<void* volatile*>(first_chunk);
+                        if (first_obj == nullptr) return false;
+                        if (!is_readable(reinterpret_cast<uintptr_t>(first_obj), 64)) return false;
 
                         return true;
                     };
@@ -1698,31 +1703,33 @@ namespace RC
                             return 0;
                         }, &exec_segments);
 
-                        // Pattern: FName constructor typically starts with:
-                        // 55                          push rbp
-                        // 41 57                       push r15
-                        // 41 56                       push r14
-                        // 41 55                       push r13
-                        // 41 54                       push r12
-                        // 53                          push rbx
-                        // 48 81 EC ?? ?? ?? ??        sub rsp, imm32
-                        // 48 89 FB                    mov rbx, rdi    (save CharType* arg)
-                        // 48 89 F7                    mov rdi, rsi    (pass EFindName as first arg to sub-call)
-                        // ... followed by a call instruction
+                        // Pattern: FName(const CharType*, EFindName) with RVO on x86_64 UE5:
+                        //   rdi = hidden return pointer (this/FName*), rsi = CharType*, rdx = EFindName&
+                        //   The constructor saves CharType* (rsi) and passes EFindName (rdx) to a sub-call.
+                        //   Common pattern: mov rbx, rsi; mov rdi, rdx; call <rel32>
+                        //   Bytes: 48 89 F3 48 89 D7 E8
                         //
-                        // Alternative shorter pattern (more common in optimized builds):
-                        // 48 89 FB                    mov rbx, rdi
-                        // 48 89 F7                    mov rdi, rsi
-                        // E8 ?? ?? ?? ??              call rel32
+                        // The OLD pattern (48 89 FB 48 89 F7 E8 = mov rbx,rdi; mov rdi,rsi; call)
+                        // matched a 2-arg FName accessor, NOT the constructor.
                         //
-                        // We search for: 48 89 FB 48 89 F7 E8
-                        // which is: mov rbx, rdi; mov rdi, rsi; call <rel32>
-                        // This pattern is very characteristic of FName(const CharType*, EFindName)
-                        // where CharType* is in rdi and EFindName is in rsi, and the constructor
-                        // passes EFindName to a sub-call while saving CharType* in rbx.
+                        // We try multiple patterns since compiler optimizations may vary.
 
-                        const uint8_t pattern[] = { 0x48, 0x89, 0xFB, 0x48, 0x89, 0xF7, 0xE8 };
-                        const size_t pattern_len = sizeof(pattern);
+                        // Pattern 1: mov rbx, rsi; mov rdi, rdx; call (RVO constructor)
+                        const uint8_t pattern1[] = { 0x48, 0x89, 0xF3, 0x48, 0x89, 0xD7, 0xE8 };
+                        // Pattern 2: mov rbp, rsi; mov rdi, rdx; call (RVO with rbp)
+                        const uint8_t pattern2[] = { 0x48, 0x89, 0xF5, 0x48, 0x89, 0xD7, 0xE8 };
+                        // Pattern 3: mov rbx, rsi; mov rsi, rdx; call (pass EFindName as 2nd arg)
+                        const uint8_t pattern3[] = { 0x48, 0x89, 0xF3, 0x48, 0x89, 0xD6, 0xE8 };
+                        // Pattern 4: mov rdi, rsi; mov rsi, rdx; call (no save, direct pass)
+                        const uint8_t pattern4[] = { 0x48, 0x89, 0xF7, 0x48, 0x89, 0xD6, 0xE8 };
+
+                        struct AOBPattern { const uint8_t* bytes; size_t len; const char* name; };
+                        AOBPattern patterns[] = {
+                            { pattern1, sizeof(pattern1), "mov rbx,rsi; mov rdi,rdx; call" },
+                            { pattern2, sizeof(pattern2), "mov rbp,rsi; mov rdi,rdx; call" },
+                            { pattern3, sizeof(pattern3), "mov rbx,rsi; mov rsi,rdx; call" },
+                            { pattern4, sizeof(pattern4), "mov rdi,rsi; mov rsi,rdx; call" },
+                        };
                         // Look for this pattern a few bytes before the actual function start
                         // (after the prologue saves). We scan backwards from the pattern match
                         // to find the function entry point (typically a push rbp or sub rsp).
@@ -1730,10 +1737,23 @@ namespace RC
                         void* found_func = nullptr;
                         for (const auto& seg : exec_segments)
                         {
-                            if (seg.size < pattern_len + 64) continue;
-                            for (size_t offset = 0; offset + pattern_len + 32 <= seg.size; offset++)
+                            if (seg.size < 16 + 64) continue;
+                            for (size_t offset = 0; offset + 16 + 32 <= seg.size; offset++)
                             {
-                                if (memcmp(seg.start + offset, pattern, pattern_len) != 0) continue;
+                                // Try each pattern
+                                int matched_pattern = -1;
+                                for (int p = 0; p < 4; p++)
+                                {
+                                    if (offset + patterns[p].len <= seg.size &&
+                                        memcmp(seg.start + offset, patterns[p].bytes, patterns[p].len) == 0)
+                                    {
+                                        matched_pattern = p;
+                                        break;
+                                    }
+                                }
+                                if (matched_pattern < 0) continue;
+
+                                size_t pat_len = patterns[matched_pattern].len;
 
                                 // Found the pattern. Now scan backwards (up to 64 bytes) to find the function start.
                                 // Function start is typically marked by:
@@ -1774,13 +1794,13 @@ namespace RC
                                 }
 
                                 // Validate: the call target (rel32 after E8) should point within an executable segment
-                                int32_t rel32 = *reinterpret_cast<int32_t*>(pattern_pos + 7);
-                                uint8_t* call_target = pattern_pos + 7 + 4 + rel32;
+                                int32_t rel32 = *reinterpret_cast<int32_t*>(pattern_pos + pat_len - 4);
+                                uint8_t* call_target = pattern_pos + pat_len + rel32;
                                 uintptr_t call_target_addr = reinterpret_cast<uintptr_t>(call_target);
                                 if (call_target_addr < 0x10000 || call_target_addr > 0x7fffffffffff) continue;
 
                                 found_func = func_start;
-                                UE4SS_DBG("[UE4SS] AOB scan: FName constructor candidate at %p (pattern at offset %zu)\n", found_func, offset);
+                                UE4SS_DBG("[UE4SS] AOB scan: FName constructor candidate at %p (pattern: %s, offset %zu)\n", found_func, patterns[matched_pattern].name, offset);
                                 break;
                             }
                             if (found_func) break;
