@@ -555,18 +555,13 @@ namespace RC
             m_load_library_ex_w_hook->hook();
 #endif // _WIN32
 #ifndef _WIN32
-            // Hook dlopen on Linux to notify C++ mods of library loads
-            dlopen_hooked = reinterpret_cast<void* (*)(const char*, int)>(dlsym(RTLD_NEXT, "dlopen"));
-            if (dlopen_hooked)
-            {
-                m_dlopen_hook_handle = funchook_create();
-                if (m_dlopen_hook_handle)
-                {
-                    auto target = reinterpret_cast<void*>(&dlopen_hooked);
-                    funchook_prepare(m_dlopen_hook_handle, &target, reinterpret_cast<void*>(&HookedDlopen));
-                    funchook_install(m_dlopen_hook_handle, 0);
-                }
-            }
+            // dlopen hook disabled on Linux — if a C++ mod's dlopen crashes and we
+            // siglongjmp out, funchook's trampoline leaves dlopen's internal state
+            // corrupted, causing every subsequent dlopen call to SIGSEGV.
+            // The hook is only used for fire_lib_load_for_cpp_mods notifications,
+            // which are non-essential in limited mode.
+            // dlopen_hooked = reinterpret_cast<void* (*)(const char*, int)>(dlsym(RTLD_NEXT, "dlopen"));
+            // ... (intentionally disabled)
 #endif
 
             UE4SS_DBG( "[UE4SS] Calling SetupUnrealModules()...\n");
@@ -2664,6 +2659,12 @@ namespace RC
         if (!Unreal::GUObjectArray)
         {
             UE4SS_DBG("[UE4SS] Linux: GUObjectArray not resolved, skipping post-setup_unreal init (output_all_member_offsets, fire_unreal_init, setup_unreal_properties, event loop)\n");
+            return;
+        }
+        if (Unreal::UObjectArray::GetNumElements() == 0)
+        {
+            UE4SS_DBG("[UE4SS] Linux: GUObjectArray has 0 elements (wrong address from heuristic scan), skipping post-setup_unreal init\n");
+            Output::send<LogLevel::Warning>(STR("Linux limited mode: GUObjectArray address appears invalid (0 elements). Mod functionality will be limited.\n"));
             return;
         }
 #endif

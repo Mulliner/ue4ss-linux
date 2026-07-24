@@ -755,8 +755,27 @@ namespace RC::Unreal::UnrealInitializer
             StaticStorage::FNameVerificationStatus.store(true, std::memory_order_release);
             StaticStorage::FNameVerificationStatus.notify_all();
         }, {false, true, STR("UE4SS"), STR("FNameConstructorVerificationHook")});
-        StaticStorage::FNameVerificationStatus.wait(false, std::memory_order_acquire);
-        Output::send(STR("FName constructor verified at 0x{:016X}\n"), std::bit_cast<uintptr_t>(FName::ConstructorInternal.get_function_address()));
+        // Wait with timeout — on stripped Linux binaries, the AOB-scanned FName
+        // constructor address may be wrong, causing the hook to never fire.
+        {
+            auto wait_start = std::chrono::steady_clock::now();
+            while (!StaticStorage::FNameVerificationStatus.load(std::memory_order_acquire))
+            {
+                if (std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - wait_start).count() > 15)
+                {
+                    Output::send<LogLevel::Warning>(STR("Timeout verifying FName constructor (hook never fired). Continuing with unverified FName address.\n"));
+                    // Remove the hook since it's not firing
+                    Hook::Internal::GetDetourInstance<Hook::Internal::EDetourTarget::FNameConstructor>()->RemoveCallback(FNameConstructedHookId);
+                    Hook::Internal::GetDetourInstance<Hook::Internal::EDetourTarget::FNameConstructor>()->DeactivateHook();
+                    break;
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(200));
+            }
+        }
+        if (StaticStorage::FNameVerificationStatus.load(std::memory_order_acquire))
+        {
+            Output::send(STR("FName constructor verified at 0x{:016X}\n"), std::bit_cast<uintptr_t>(FName::ConstructorInternal.get_function_address()));
+        }
 
         if (AddressOverride)
         {
@@ -841,6 +860,17 @@ namespace RC::Unreal::UnrealInitializer
                 }
             }
         }
+#ifdef __linux__
+        // If GUObjectArray has 0 elements after waiting, the heuristic scan found
+        // the wrong address. Skip PostInitialize to avoid crashing on object iteration.
+        if (UObjectArray::GetNumElements() == 0)
+        {
+            fprintf(stderr, "[UE4SS] Initialize: GUObjectArray has 0 elements (wrong address?), skipping PostInitialize\n");
+            Output::send<LogLevel::Warning>(STR("Linux limited mode: GUObjectArray address appears invalid (0 elements). Mod functionality will be limited.\n"));
+            StaticStorage::bIsInitialized = true;
+            return;
+        }
+#endif
         // We're assuming that KismetStringLibrary, KismetStringLibrary.Conv_NameToString, and the KismetStringLibrary CDO exists.
         // We will lock here forever if that's not the case.
         // Consider adding a limit to how long we can wait.

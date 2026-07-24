@@ -84,7 +84,7 @@ namespace RC
         m_uninstall_mod_func = reinterpret_cast<uninstall_type>(GetProcAddress(m_main_lib_module, "uninstall_mod"));
 #else
         auto lib_path_utf8 = lib_path.string();
-        m_main_lib_module = dlopen(lib_path_utf8.c_str(), RTLD_NOW | RTLD_GLOBAL);
+        m_main_lib_module = dlopen(lib_path_utf8.c_str(), RTLD_LAZY | RTLD_GLOBAL);
 
         if (!m_main_lib_module)
         {
