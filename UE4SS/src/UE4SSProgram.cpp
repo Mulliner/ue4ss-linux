@@ -1090,7 +1090,7 @@ namespace RC
                         if (max_elements <= 0 || max_elements > 10000000) return false;
 
                         int32_t num_elements = *reinterpret_cast<int32_t*>(candidate + 0x24);
-                        if (num_elements < 0 || num_elements > max_elements) return false;
+                        if (num_elements <= 0 || num_elements > max_elements) return false;
 
                         int32_t max_chunks = *reinterpret_cast<int32_t*>(candidate + 0x28);
                         if (max_chunks <= 0 || max_chunks > 10000) return false;
@@ -2624,7 +2624,7 @@ namespace RC
             // UE function addresses (GUObjectArray, ProcessInternal, etc.) for hook registration
             // and the UObjectArray delete listener. Only call them if address resolution succeeded
             // (via dlsym on unstripped binaries or manual UE4SS_Addresses.ini overrides).
-            if (Unreal::GUObjectArray)
+            if (Unreal::GUObjectArray && Unreal::UObjectArray::GetNumElements() > 0)
             {
                 UE4SS_DBG( "[UE4SS] Linux: GUObjectArray resolved, calling LuaMod::on_program_start() and fire_program_start_for_cpp_mods()...\n");
                 TRY([&] { LuaMod::on_program_start(); });
