@@ -1166,10 +1166,15 @@ namespace RC
                                 if (checked.count(target)) continue;
                                 checked.insert(target);
 
-                                if (validate_fuobjectarray(reinterpret_cast<uint8_t*>(target))) {
-                                    UE4SS_DBG("[UE4SS] Code scan: valid GUObjectArray at %p (from ref at %p)\n",
-                                              reinterpret_cast<void*>(target), p);
-                                    return reinterpret_cast<void*>(target);
+                                // The RIP-relative ref may point to a field WITHIN GUObjectArray,
+                                // not necessarily offset 0. Try common offsets (0x00, 0x08, 0x10, 0x18, 0x20).
+                                for (int off = 0; off <= 0x20; off += 0x8) {
+                                    uint8_t* candidate = reinterpret_cast<uint8_t*>(target) - off;
+                                    if (validate_fuobjectarray(candidate)) {
+                                        UE4SS_DBG("[UE4SS] Code scan: valid GUObjectArray at %p (from ref at %p, offset -0x%X)\n",
+                                                  candidate, p, off);
+                                        return reinterpret_cast<void*>(candidate);
+                                    }
                                 }
                             }
                         }
