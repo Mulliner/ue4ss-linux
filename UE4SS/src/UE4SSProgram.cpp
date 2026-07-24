@@ -1090,7 +1090,7 @@ namespace RC
                         if (max_elements <= 0 || max_elements > 10000000) return false;
 
                         int32_t num_elements = *reinterpret_cast<int32_t*>(candidate + 0x24);
-                        if (num_elements < 100 || num_elements > max_elements) return false;
+                        if (num_elements < 1 || num_elements > max_elements) return false;
 
                         int32_t max_chunks = *reinterpret_cast<int32_t*>(candidate + 0x28);
                         if (max_chunks <= 0 || max_chunks > 10000) return false;
@@ -1689,6 +1689,15 @@ namespace RC
 
                         dl_iterate_phdr([](struct dl_phdr_info* info, size_t, void* data) -> int {
                             auto* segs = static_cast<std::vector<ExecSegment>*>(data);
+                            // Only scan the main executable (dlpi_name == "" or ends with "PalServer-Linux-Shipping")
+                            if (info->dlpi_name[0] != '\0') {
+                                const char* name = info->dlpi_name;
+                                size_t len = strlen(name);
+                                if (len < 5 || strcmp(name + len - 5, "pping") != 0) {
+                                    // Also check for empty name (main executable)
+                                    if (info->dlpi_name[0] != '\0') return 0;
+                                }
+                            }
                             for (int i = 0; i < info->dlpi_phnum; i++) {
                                 const ElfW(Phdr)* phdr = &info->dlpi_phdr[i];
                                 if (phdr->p_type == PT_LOAD && (phdr->p_flags & PF_X)) {
