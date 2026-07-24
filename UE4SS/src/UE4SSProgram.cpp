@@ -1695,27 +1695,27 @@ namespace RC
 
                         dl_iterate_phdr([](struct dl_phdr_info* info, size_t, void* data) -> int {
                             auto* segs = static_cast<std::vector<ExecSegment>*>(data);
-                            // Only scan the main executable
-                            const char* name = info->dlpi_name;
-                            bool is_main = (!name || name[0] == '\0');
-                            if (!is_main) {
-                                std::string nm(name);
-                                if (nm.find("PalServer-Linux-Shipping") != std::string::npos)
-                                    is_main = true;
-                            }
-                            if (!is_main) return 0;
+                            // Scan all executable segments, but skip libraries with high addresses
+                            // (only scan the main executable which has low addresses on non-PIE)
                             for (int i = 0; i < info->dlpi_phnum; i++) {
                                 const ElfW(Phdr)* phdr = &info->dlpi_phdr[i];
                                 if (phdr->p_type == PT_LOAD && (phdr->p_flags & PF_X)) {
                                     uint8_t* seg_start = reinterpret_cast<uint8_t*>(info->dlpi_addr + phdr->p_vaddr);
                                     size_t seg_size = phdr->p_memsz;
-                                    if (seg_size > 0x1000) {
+                                    // Only scan segments in the low address range (main executable, non-PIE)
+                                    // This filters out shared libraries which are loaded at high addresses
+                                    if (seg_size > 0x1000 && reinterpret_cast<uintptr_t>(seg_start) < 0x100000000ULL) {
                                         segs->push_back({seg_start, seg_size});
                                     }
                                 }
                             }
                             return 0;
                         }, &exec_segments);
+
+                        UE4SS_DBG("[UE4SS] AOB scan: %zu executable segments found for FName scan\n", exec_segments.size());
+                        for (size_t i = 0; i < exec_segments.size(); i++) {
+                            UE4SS_DBG("[UE4SS] AOB scan: seg %zu: start=%p, size=0x%zx\n", i, exec_segments[i].start, exec_segments[i].size);
+                        }
 
                         // Pattern: FName(const CharType*, EFindName) with RVO on x86_64 UE5:
                         //   rdi = hidden return pointer (this/FName*), rsi = CharType*, rdx = EFindName&
@@ -1776,6 +1776,8 @@ namespace RC
                                 if (matched_pattern < 0) continue;
 
                                 size_t pat_len = patterns[matched_pattern].len;
+                                UE4SS_DBG("[UE4SS] AOB scan: pattern '%s' matched at offset %zu (addr %p)\n",
+                                          patterns[matched_pattern].name, offset, seg.start + offset);
 
                                 // Found the pattern. Now scan backwards (up to 64 bytes) to find the function start.
                                 // Function start is typically marked by:
@@ -1816,10 +1818,14 @@ namespace RC
                                 }
 
                                 // Validate: the call target (rel32 after E8) should point within an executable segment
-                                int32_t rel32 = *reinterpret_cast<int32_t*>(pattern_pos + pat_len - 4);
-                                uint8_t* call_target = pattern_pos + pat_len + rel32;
+                                // E8 is the last byte of the pattern, so rel32 starts at pattern_pos + pat_len
+                                int32_t rel32 = *reinterpret_cast<int32_t*>(pattern_pos + pat_len);
+                                uint8_t* call_target = pattern_pos + pat_len + 4 + rel32;
                                 uintptr_t call_target_addr = reinterpret_cast<uintptr_t>(call_target);
-                                if (call_target_addr < 0x10000 || call_target_addr > 0x7fffffffffff) continue;
+                                if (call_target_addr < 0x10000 || call_target_addr > 0x7fffffffffff) {
+                                    UE4SS_DBG("[UE4SS] AOB scan: call_target %p out of range (rel32=%d, pattern_pos=%p), skipping\n", (void*)call_target, rel32, (void*)pattern_pos);
+                                    continue;
+                                }
 
                                 found_func = func_start;
                                 UE4SS_DBG("[UE4SS] AOB scan: FName constructor candidate at %p (pattern: %s, offset %zu)\n", found_func, patterns[matched_pattern].name, offset);
