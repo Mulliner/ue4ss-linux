@@ -30,7 +30,7 @@ namespace RC::File
 
     auto LinuxFile::delete_file(const std::filesystem::path& file_path_and_name) -> void
     {
-        auto path_utf8 = to_string(file_path_and_name.wstring());
+        auto path_utf8 = file_path_and_name.string();
         if (::remove(path_utf8.c_str()) != 0)
         {
             THROW_INTERNAL_FILE_ERROR(fmt::format("[LinuxFile::delete_file] Was unable to delete file, error: {}",
@@ -459,7 +459,7 @@ namespace RC::File
         }
 
         fprintf(stderr, "[UE4SS] LinuxFile::open_file: converting path...\n");
-        auto path_utf8 = to_string(file_name_and_path.wstring());
+        auto path_utf8 = file_name_and_path.string();
         fprintf(stderr, "[UE4SS] LinuxFile::open_file: path converted to: %s\n", path_utf8.c_str());
         int fd = ::open(path_utf8.c_str(), flags, 0644);
         if (fd < 0)

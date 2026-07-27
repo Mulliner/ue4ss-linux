@@ -277,10 +277,22 @@ namespace RC
 
     auto inline to_string(const std::wstring& input) -> std::string
     {
-#pragma warning(disable : 4996)
-        static std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter{};
-        return converter.to_bytes(input);
-#pragma warning(default : 4996)
+        try
+        {
+            static std::wstring_convert<std::codecvt_utf8<wchar_t>> converter{};
+            return converter.to_bytes(input);
+        }
+        catch (...)
+        {
+            std::string result;
+            result.reserve(input.size());
+            for (wchar_t wc : input)
+            {
+                if (wc <= 0x7F) result.push_back(static_cast<char>(wc));
+                else result.push_back('?');
+            }
+            return result;
+        }
     }
 
     auto inline to_string(const wchar_t* pInput)

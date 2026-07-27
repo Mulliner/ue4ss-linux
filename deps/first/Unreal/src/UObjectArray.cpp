@@ -1,6 +1,7 @@
 #include <Unreal/UObjectArray.hpp>
 #include <Unreal/UObject.hpp>
 #include <Unreal/UKismetSystemLibrary.hpp>
+#include <Unreal/FMemory.hpp>
 
 namespace RC::Unreal
 {

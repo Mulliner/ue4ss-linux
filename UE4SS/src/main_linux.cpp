@@ -275,8 +275,19 @@ static auto thread_dll_start() -> void
         install_signal_handlers();
 
         UE4SS_DBG("[UE4SS] Calling init()...\n");
-        s_program->init();
-        UE4SS_DBG("[UE4SS] init() completed successfully.\n");
+        try
+        {
+            s_program->init();
+            UE4SS_DBG("[UE4SS] init() completed successfully.\n");
+        }
+        catch (const std::bad_cast& bc)
+        {
+            UE4SS_ERR("[UE4SS] Caught std::bad_cast during init (continuing): %s\n", bc.what());
+        }
+        catch (const std::exception& ex)
+        {
+            UE4SS_ERR("[UE4SS] Caught std::exception during init: %s\n", ex.what());
+        }
 
         s_has_jmpbuf = false;
         restore_signal_handlers();

@@ -33,19 +33,22 @@ impl_resolver_singleton!(ElfImage, FNameCtorWchar, |ctx| async {
     use crate::resolvers::ResolveError;
     use std::collections::HashSet;
 
+    // Only the trailing null is anchored on. Some linkers (e.g. The Isle: Evrima's
+    // UE5.6 Linux server) pack these literals without a preceding null char16, so
+    // requiring a leading \0 matches nothing and the resolver fails outright.
     let strings = [
-        "\0Engine\0",
-        "\0Renderer\0",
-        "\0AnimGraphRuntime\0",
-        "\0Landscape\0",
-        "\0RenderCore\0",
+        "Engine\0",
+        "Renderer\0",
+        "AnimGraphRuntime\0",
+        "Landscape\0",
+        "RenderCore\0",
     ];
 
     // find the strings
     let strings = join_all(strings.iter().map(|s| ctx.scan(util::utf16_pattern(s)))).await;
     let strings: Vec<Vec<_>> = strings
         .into_iter()
-        .map(|pats| pats.into_iter().map(|addr| addr + 2).collect())
+        .map(|pats| pats.into_iter().collect())
         .collect();
     //eprintln!("Find each pattern @ {:?}", strings);
     // find refs to them

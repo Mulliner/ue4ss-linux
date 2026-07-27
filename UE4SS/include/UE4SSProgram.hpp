@@ -360,13 +360,13 @@ namespace RC
             if constexpr (std::is_same_v<T, LuaMod>)
             {
                 return static_cast<LuaMod*>(find_mod_by_name_internal(mod_name, is_installed, is_started, [](auto elem) -> bool {
-                    return dynamic_cast<LuaMod*>(elem);
+                    try { return dynamic_cast<LuaMod*>(elem) != nullptr; } catch (...) { return false; }
                 }));
             }
             else if constexpr (std::is_same_v<T, CppMod>)
             {
                 return static_cast<CppMod*>(find_mod_by_name_internal(mod_name, is_installed, is_started, [](auto elem) -> bool {
-                    return dynamic_cast<CppMod*>(elem);
+                    try { return dynamic_cast<CppMod*>(elem) != nullptr; } catch (...) { return false; }
                 }));
             }
             else

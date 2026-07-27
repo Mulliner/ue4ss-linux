@@ -669,7 +669,11 @@ namespace RC::Unreal
             add_property(STR("/Script/CoreUObject.Property"), FProperty{});
         }
 
-        if (FText::StaticSize() == 0)
+        // Test the raw value rather than the accessor: StaticSize_Private starts at -1, and
+        // FText::StaticSize() throws on anything below zero. Calling it here to detect the
+        // "size was never found" case therefore threw straight past this fallback instead of
+        // taking it, aborting the whole of store_all_object_types().
+        if (FText::StaticSize_Private <= 0)
         {
             FText::StaticSize_Private = sizeof(FText);
             Output::send<LogLevel::Warning>(STR("Was unable to detect FText size, using default: 0x{:X} bytes.\n"), FText::StaticSize());

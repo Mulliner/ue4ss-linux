@@ -235,7 +235,19 @@ namespace RC::Unreal
             // Assign the temporary address if one exists
             if (FunctionAddressOverride) { ConstructorInternal.assign_temp_address(FunctionAddressOverride); }
 
+#ifdef __linux__
+            // ConstructorInternal is declared as FName(const CharType*, EFindName), i.e. a factory
+            // returning an 8-byte FName in RAX. On the Linux ELF builds the address we resolve is
+            // the genuine C++ constructor instead, so under SysV it expects:
+            //     rdi = FName* this, rsi = const CharType* name, rdx = EFindName
+            // Calling it through the factory signature shifts every argument down one register:
+            // the string lands in `this` and EFindName lands in the string pointer, which the
+            // callee immediately dereferences (movzx edi, WORD PTR [rax]) and dies on.
+            FName Name{};
+            std::bit_cast<void (*)(FName*, const CharType*, EFindName)>(ConstructorInternal.get_function_address())(&Name, StrName, FindType);
+#else
             FName Name = ConstructorInternal(StrName, FindType);
+#endif
             ComparisonIndex = Name.ComparisonIndex;
 #ifdef WITH_CASE_PRESERVING_NAME
             DisplayIndex = Name.DisplayIndex;

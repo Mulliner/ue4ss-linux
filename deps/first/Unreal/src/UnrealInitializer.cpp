@@ -34,6 +34,7 @@
 #ifndef _WIN32
 #include <link.h>
 #include <dlfcn.h>
+#include <unistd.h>
 #endif
 #include <Helpers/String.hpp>
 #include <Helpers/SysError.hpp>
@@ -60,6 +61,17 @@ namespace RC::Unreal::UnrealInitializer
 
     auto HookedEngineTick(Hook::TCallbackIterationData<void>&, UEngine*, float, bool) -> void
     {
+#ifdef __linux__
+        // One-shot proof that the UGameEngine::Tick detour is actually live. Everything Lua does
+        // on the game thread (ExecuteInGameThread, LoopInGameThreadWithDelay) is pumped from
+        // here, so if this never prints, mods load but their callbacks never run.
+        static bool bLoggedFirstTick = false;
+        if (!bLoggedFirstTick)
+        {
+            bLoggedFirstTick = true;
+            fprintf(stderr, "[UE4SS] EngineTick detour fired — game thread is being pumped.\n");
+        }
+#endif
         if (GGameThreadId == std::thread::id{})
         {
             GGameThreadId = std::this_thread::get_id();
@@ -244,41 +256,57 @@ namespace RC::Unreal::UnrealInitializer
         // Verify that the main exe was found
         if (SigScannerStaticData::m_modules_info[ScanTarget::MainExe].lpBaseOfDll == nullptr)
         {
-            // Fallback: use /proc/self/maps to find the main executable
+            // Fallback: identify the main executable from /proc/self/maps by
+            // matching the real path from /proc/self/exe. The previous heuristic
+            // only recognized Palworld-style names ("Pal"/"Game"), so any other
+            // UE game (e.g. TheIsleServer-Linux-Shipping) was never matched here,
+            // leaving MainExe's base null — which then crashed the AOB scanner
+            // with a SIGSEGV. Matching the exe's own path works for any game.
+            char exe_real[4096]{};
+            ssize_t exe_len = readlink("/proc/self/exe", exe_real, sizeof(exe_real) - 1);
+            if (exe_len > 0) { exe_real[exe_len] = '\0'; }
+
             FILE* maps = fopen("/proc/self/maps", "r");
             if (maps)
             {
-                char line[512];
-                unsigned long main_start = 0;
-                unsigned long main_end = 0;
+                char line[4096];
+                unsigned long seg_start = 0;
+                unsigned long seg_end = 0;
                 char perms[8];
-                char pathname[256];
+                char pathname[4096];
+                unsigned long module_base = 0;
+                unsigned long module_end = 0;
 
                 while (fgets(line, sizeof(line), maps))
                 {
+                    pathname[0] = '\0';
                     // Parse: address perms offset dev inode pathname
-                    if (sscanf(line, "%lx-%lx %7s %*x %*x:%*x %*d %255s", &main_start, &main_end, perms, pathname) == 4)
+                    if (sscanf(line, "%lx-%lx %7s %*x %*x:%*x %*d %4095s", &seg_start, &seg_end, perms, pathname) >= 3)
                     {
-                        // Look for the main executable (no pathname or pathname containing the exe name)
-                        if (pathname[0] == '\0' || strstr(pathname, "Pal") != nullptr || strstr(pathname, "Game") != nullptr)
+                        // Accumulate every mapping backed by the main exe's file:
+                        // base = lowest start, end = highest end (covers all its
+                        // PT_LOAD segments so the scanner sees the whole image).
+                        if (exe_len > 0 && strcmp(pathname, exe_real) == 0)
                         {
-                            if (main_start != 0)
-                            {
-                                MODULEINFO main_module{};
-                                main_module.lpBaseOfDll = reinterpret_cast<void*>(main_start);
-                                main_module.SizeOfImage = main_end - main_start;
-                                main_module.EntryPoint = nullptr;
-
-                                for (size_t i = 0; i < static_cast<size_t>(ScanTarget::Max); ++i)
-                                {
-                                    (*cb_data.modules_info)[i] = main_module;
-                                }
-                                break;
-                            }
+                            if (module_base == 0 || seg_start < module_base) { module_base = seg_start; }
+                            if (seg_end > module_end) { module_end = seg_end; }
                         }
                     }
                 }
                 fclose(maps);
+
+                if (module_base != 0)
+                {
+                    MODULEINFO main_module{};
+                    main_module.lpBaseOfDll = reinterpret_cast<void*>(module_base);
+                    main_module.SizeOfImage = module_end - module_base;
+                    main_module.EntryPoint = nullptr;
+
+                    for (size_t i = 0; i < static_cast<size_t>(ScanTarget::Max); ++i)
+                    {
+                        (*cb_data.modules_info)[i] = main_module;
+                    }
+                }
             }
         }
 
@@ -871,133 +899,194 @@ namespace RC::Unreal::UnrealInitializer
             return;
         }
 #endif
-        // We're assuming that KismetStringLibrary, KismetStringLibrary.Conv_NameToString, and the KismetStringLibrary CDO exists.
-        // We will lock here forever if that's not the case.
-        // Consider adding a limit to how long we can wait.
-        Output::send(STR("Locating KismetSystemLibrary...\n"));
-        UClass* KismetStringLibrary{};
+        if (!StaticStorage::FNameVerificationStatus.load(std::memory_order_acquire))
         {
-            auto wait_start = std::chrono::steady_clock::now();
-            while (!KismetStringLibrary)
+            Output::send<LogLevel::Warning>(STR("FNameConstructor unverified on Linux, skipping KismetSystemLibrary location.\n"));
+        }
+        else
+        try
+        {
+            Output::send(STR("Locating KismetSystemLibrary...\n"));
+            UClass* KismetStringLibrary{};
             {
-                KismetStringLibrary = static_cast<UClass*>(UObjectGlobals::StaticFindObject_InternalNoToStringFromStrings({STR("/Script/Engine"), STR("KismetStringLibrary")}));
-                if (!KismetStringLibrary)
+                auto wait_start = std::chrono::steady_clock::now();
+                while (!KismetStringLibrary)
                 {
-                    if (std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - wait_start).count() > 30)
+                    KismetStringLibrary = static_cast<UClass*>(UObjectGlobals::StaticFindObject_InternalNoToStringFromStrings({STR("/Script/Engine"), STR("KismetStringLibrary")}));
+                    if (!KismetStringLibrary)
                     {
-                        Output::send<LogLevel::Warning>(STR("Timeout locating KismetStringLibrary. FName::ToString via Conv_NameToString will not be available.\n"));
-                        break;
+                        if (std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - wait_start).count() > 5)
+                        {
+                            Output::send<LogLevel::Warning>(STR("Timeout locating KismetStringLibrary. FName::ToString via Conv_NameToString will not be available.\n"));
+                            break;
+                        }
+                        std::this_thread::sleep_for(std::chrono::milliseconds(100));
                     }
-                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                }
+            }
+            Output::send(STR("Locating KismetSystemLibrary:Conv_NameToString...\n"));
+            {
+                auto wait_start = std::chrono::steady_clock::now();
+                while (!FName::Conv_NameToStringInternal && KismetStringLibrary)
+                {
+                    FName::Conv_NameToStringInternal = KismetStringLibrary->GetFunctionByName(FName(STR("Conv_NameToString"), FNAME_Find));
+                    if (!FName::Conv_NameToStringInternal)
+                    {
+                        FName::Conv_NameToStringInternal = static_cast<UFunction*>(UObjectGlobals::StaticFindObject_InternalNoToStringFromStrings({STR("/Script/Engine"), STR("KismetStringLibrary"), STR("Conv_NameToString")}));
+                    }
+                    if (!FName::Conv_NameToStringInternal)
+                    {
+                        if (std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - wait_start).count() > 5)
+                        {
+                            Output::send<LogLevel::Warning>(STR("Timeout locating Conv_NameToString. FName::ToString will use fallback.\n"));
+                            break;
+                        }
+                        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                    }
+                }
+            }
+            Output::send(STR("Locating KismetSystemLibrary CDO...\n"));
+            {
+                auto wait_start = std::chrono::steady_clock::now();
+                while (!FName::KismetStringLibraryCDO && KismetStringLibrary)
+                {
+                    FName::KismetStringLibraryCDO = KismetStringLibrary->GetClassDefaultObject();
+                    if (!FName::KismetStringLibraryCDO)
+                    {
+                        if (std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - wait_start).count() > 5)
+                        {
+                            Output::send<LogLevel::Warning>(STR("Timeout locating KismetStringLibrary CDO. Continuing without it.\n"));
+                            break;
+                        }
+                        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                    }
                 }
             }
         }
-        // For some games, it's found in GUObjectArray, and in other games, it's found in the function linked list.
-        Output::send(STR("Locating KismetSystemLibrary:Conv_NameToString...\n"));
+        catch (...)
         {
-            auto wait_start = std::chrono::steady_clock::now();
-            while (!FName::Conv_NameToStringInternal && KismetStringLibrary)
-            {
-                FName::Conv_NameToStringInternal = KismetStringLibrary->GetFunctionByName(FName(STR("Conv_NameToString"), FNAME_Find));
-                if (!FName::Conv_NameToStringInternal)
-                {
-                    FName::Conv_NameToStringInternal = static_cast<UFunction*>(UObjectGlobals::StaticFindObject_InternalNoToStringFromStrings({STR("/Script/Engine"), STR("KismetStringLibrary"), STR("Conv_NameToString")}));
-                }
-                if (!FName::Conv_NameToStringInternal)
-                {
-                    if (std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - wait_start).count() > 30)
-                    {
-                        Output::send<LogLevel::Warning>(STR("Timeout locating Conv_NameToString. FName::ToString will use fallback.\n"));
-                        break;
-                    }
-                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
-                }
-            }
-        }
-        Output::send(STR("Locating KismetSystemLibrary CDO...\n"));
-        {
-            auto wait_start = std::chrono::steady_clock::now();
-            while (!FName::KismetStringLibraryCDO && KismetStringLibrary)
-            {
-                FName::KismetStringLibraryCDO = KismetStringLibrary->GetClassDefaultObject();
-                if (!FName::KismetStringLibraryCDO)
-                {
-                    if (std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - wait_start).count() > 30)
-                    {
-                        Output::send<LogLevel::Warning>(STR("Timeout locating KismetStringLibrary CDO. Continuing without it.\n"));
-                        break;
-                    }
-                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
-                }
-            }
+            Output::send<LogLevel::Warning>(STR("Caught exception locating KismetSystemLibrary, continuing initialization...\n"));
         }
 
         // Objects that are required to exist before we can continue
-        Hook::AddRequiredObject({STR("/Script/CoreUObject"), STR("Class")});
-        Hook::AddRequiredObject({STR("/Script/CoreUObject")});
-        Hook::AddRequiredObject({STR("/Script/CoreUObject"), STR("Struct")});
-        Hook::AddRequiredObject({STR("/Script/Engine"), STR("Pawn")});
-        Hook::AddRequiredObject({STR("/Script/Engine"), STR("Character")});
-        Hook::AddRequiredObject({STR("/Script/Engine"), STR("Actor")});
-        Hook::AddRequiredObject({STR("/Script/CoreUObject"), STR("Vector")});
-        Hook::AddRequiredObject({STR("/Script/Engine"), STR("Default__DefaultPawn")});
-        Hook::AddRequiredObject({STR("/Script/Engine"), STR("HitResult")});
-        Hook::AddRequiredObject({STR("/Script/Engine"), STR("Default__MaterialExpression")});
-        Hook::AddRequiredObject({STR("/Script/Engine"), STR("ActorComponent")});
-        Hook::AddRequiredObject({STR("/Script/CoreUObject"), STR("OrientedBox")});
-        Hook::AddRequiredObject({STR("/Script/Engine"), STR("MovementComponent")});
-        Hook::AddRequiredObject({STR("/Script/Engine"), STR("HUD")});
-        Hook::AddRequiredObject({STR("/Script/Engine"), STR("PlayerController")});
-        Hook::AddRequiredObject({STR("/Script/Engine"), STR("PlayerCameraManager")});
-        Hook::AddRequiredObject({STR("/Script/CoreUObject"), STR("EInterpCurveMode")});
-        Hook::AddRequiredObject({STR("/Script/Engine"), STR("ENetRole")});
-        Hook::AddRequiredObject({STR("/Script/MovieScene"), STR("MovieSceneEditorData")});
-        Hook::AddRequiredObject({STR("/Script/UMG"), STR("Widget")});
-        Hook::AddRequiredObject({STR("/Script/UMG"), STR("ComboBoxString")});
-        Hook::AddRequiredObject({STR("/Script/CoreUObject"), STR("Interface")});
-        if (Version::IsBelow(5, 4))
+#ifdef __linux__
+        if (!StaticStorage::FNameVerificationStatus.load(std::memory_order_acquire))
         {
-            Hook::AddRequiredObject({STR("/Script/CoreUObject"), STR("DynamicClass")});
+            Output::send<LogLevel::Warning>(STR("FNameConstructor unverified on Linux, skipping Hook::AddRequiredObject tracking.\n"));
+        }
+        else
+#endif
+        try
+        {
+            Hook::AddRequiredObject({STR("/Script/CoreUObject"), STR("Class")});
+            Hook::AddRequiredObject({STR("/Script/CoreUObject")});
+            Hook::AddRequiredObject({STR("/Script/CoreUObject"), STR("Struct")});
+            Hook::AddRequiredObject({STR("/Script/Engine"), STR("Pawn")});
+            Hook::AddRequiredObject({STR("/Script/Engine"), STR("Character")});
+            Hook::AddRequiredObject({STR("/Script/Engine"), STR("Actor")});
+            Hook::AddRequiredObject({STR("/Script/CoreUObject"), STR("Vector")});
+            Hook::AddRequiredObject({STR("/Script/Engine"), STR("Default__DefaultPawn")});
+            Hook::AddRequiredObject({STR("/Script/Engine"), STR("HitResult")});
+            Hook::AddRequiredObject({STR("/Script/Engine"), STR("Default__MaterialExpression")});
+            Hook::AddRequiredObject({STR("/Script/Engine"), STR("ActorComponent")});
+            Hook::AddRequiredObject({STR("/Script/CoreUObject"), STR("OrientedBox")});
+            Hook::AddRequiredObject({STR("/Script/Engine"), STR("MovementComponent")});
+            Hook::AddRequiredObject({STR("/Script/Engine"), STR("HUD")});
+            Hook::AddRequiredObject({STR("/Script/Engine"), STR("PlayerController")});
+            Hook::AddRequiredObject({STR("/Script/Engine"), STR("PlayerCameraManager")});
+            Hook::AddRequiredObject({STR("/Script/CoreUObject"), STR("EInterpCurveMode")});
+            Hook::AddRequiredObject({STR("/Script/Engine"), STR("ENetRole")});
+            Hook::AddRequiredObject({STR("/Script/MovieScene"), STR("MovieSceneEditorData")});
+            Hook::AddRequiredObject({STR("/Script/UMG"), STR("Widget")});
+            Hook::AddRequiredObject({STR("/Script/UMG"), STR("ComboBoxString")});
+            Hook::AddRequiredObject({STR("/Script/CoreUObject"), STR("Interface")});
+            if (Version::IsBelow(5, 4))
+            {
+                Hook::AddRequiredObject({STR("/Script/CoreUObject"), STR("DynamicClass")});
+            }
+
+            if (!Hook::AllRequiredObjectsConstructed())
+            {
+                for (int32_t i = 0; i < 2000 && !Hook::StaticStorage::bAllRequiredObjectsConstructed; ++i)
+                {
+                    if (Hook::StaticStorage::RequiredObjectsForInit.empty()) { break; }
+                    for (auto& RequiredObject : Hook::StaticStorage::RequiredObjectsForInit)
+                    {
+                        if (Hook::StaticStorage::NumRequiredObjectsConstructed >= Hook::StaticStorage::RequiredObjectsForInit.size())
+                        {
+                            Hook::StaticStorage::bAllRequiredObjectsConstructed = true;
+                            break;
+                        }
+
+                        if (RequiredObject.ObjectConstructed) { continue; }
+
+                        UObject* required_object_ptr = UObjectGlobals::StaticFindObject_InternalNoToStringFromNames(RequiredObject.ObjectNameParts);
+                        if (required_object_ptr)
+                        {
+                            RequiredObject.ObjectConstructed = true;
+                            ++Hook::StaticStorage::NumRequiredObjectsConstructed;
+                            Output::send(STR("Constructed [{} / {}]: {}\n"), Hook::StaticStorage::NumRequiredObjectsConstructed, Hook::StaticStorage::RequiredObjectsForInit.size(), RequiredObject.ObjectNameParts.back().ToString());
+                        }
+                    }
+
+                    std::this_thread::sleep_for(std::chrono::milliseconds(250));
+                }
+            }
+        }
+        catch (...)
+        {
+            Output::send<LogLevel::Warning>(STR("Caught exception during AddRequiredObject tracking, continuing...\n"));
         }
 
-        if (!Hook::AllRequiredObjectsConstructed())
+        // Populate the TypeChecker tables before anything below tries to classify an object.
+        // UObject::IsA<T>() resolves T through TypeChecker's StaticClassStorage and throws while
+        // it is still null, so every lookup that filters by type (UObjectGlobals::FindFirstOf,
+        // the searcher pools in PostInitialize) depends on these two calls having already run.
+        // Both only need a working FName constructor and GUObjectArray, which are ready by now.
+#ifdef __linux__
+        // store_all_object_names() constructs FNames, which jumps through
+        // FName::ConstructorInternal. If that address was never verified it is a scan guess that
+        // may point anywhere, and calling it takes down the game with SIGSEGV. Every other FName
+        // use during init is already gated on this flag; this call was the one that wasn't.
+        if (!StaticStorage::FNameVerificationStatus.load(std::memory_order_acquire))
         {
-            for (int32_t i = 0; i < 2000 && !Hook::StaticStorage::bAllRequiredObjectsConstructed; ++i)
+            Output::send<LogLevel::Warning>(STR("FNameConstructor unverified on Linux, skipping TypeChecker::store_all_object_names.\n"));
+        }
+        else
+#endif
+        TypeChecker::store_all_object_names();
+
+        // The bool return says "some core objects are missing, carry on degraded", but the
+        // lookups inside can also throw when a type is absent. Treat a throw the same way
+        // rather than letting it abort init entirely.
+        try
+        {
+            if (!TypeChecker::store_all_object_types())
             {
-                // The control variable for this loop is controlled from the game thread in a
-                // hook created in the function call right above this loop
-
-                if (Hook::StaticStorage::RequiredObjectsForInit.empty()) { break; }
-                for (auto& RequiredObject : Hook::StaticStorage::RequiredObjectsForInit)
-                {
-                    if (Hook::StaticStorage::NumRequiredObjectsConstructed >= Hook::StaticStorage::RequiredObjectsForInit.size())
-                    {
-                        Hook::StaticStorage::bAllRequiredObjectsConstructed = true;
-                        break;
-                    }
-
-                    if (RequiredObject.ObjectConstructed) { continue; }
-
-                    UObject* required_object_ptr = UObjectGlobals::StaticFindObject_InternalNoToStringFromNames(RequiredObject.ObjectNameParts);
-                    if (required_object_ptr)
-                    {
-                        RequiredObject.ObjectConstructed = true;
-                        ++Hook::StaticStorage::NumRequiredObjectsConstructed;
-                        Output::send(STR("Constructed [{} / {}]: {}\n"), Hook::StaticStorage::NumRequiredObjectsConstructed, Hook::StaticStorage::RequiredObjectsForInit.size(), RequiredObject.ObjectNameParts.back().ToString());
-                    }
-                }
-
-                // Sleeping here will prevent this loop from getting optimized away
-                // It will also prevent unnecessarily high CPU usage
-                std::this_thread::sleep_for(std::chrono::milliseconds(250));
+                Output::send<LogLevel::Warning>(STR("Warning: TypeChecker was unable to find some or all of the required core objects (continuing in limited mode)\n"));
             }
+        }
+        catch (const std::exception& e)
+        {
+            Output::send<LogLevel::Warning>(STR("Warning: TypeChecker threw while resolving core object types (continuing in limited mode): {}\n"), ensure_str(e.what()));
         }
 
         auto GetInstanceFromClass = [](const TCHAR* ClassName, const TCHAR* FallbackCDO) {
-            auto Instance = UObjectGlobals::FindFirstOf(ClassName);
+            UObject* Instance = nullptr;
+#ifdef __linux__
+            // FindFirstOf filters candidates with IsA<UClass>(), which calls UClass::StaticClass()
+            // and throws while UClass::StaticClassStorage is still null — and it stays null until
+            // TypeChecker::store_all_object_types() runs, further down this same function. Look
+            // the CDO up by path instead; that has no such ordering dependency.
+            Instance = UObjectGlobals::StaticFindObject_InternalSlow(nullptr, nullptr, FallbackCDO);
             if (!Instance)
+#endif
             {
-                Instance = UObjectGlobals::StaticFindObject_InternalSlow(nullptr, nullptr, FallbackCDO);
+                Instance = UObjectGlobals::FindFirstOf(ClassName);
+                if (!Instance)
+                {
+                    Instance = UObjectGlobals::StaticFindObject_InternalSlow(nullptr, nullptr, FallbackCDO);
+                }
             }
             return Instance;
         };
@@ -1187,8 +1276,6 @@ namespace RC::Unreal::UnrealInitializer
             }
         }
 
-        TypeChecker::store_all_object_names();
-
         Output::send(STR("Constructed {} of {} objects\n"), Hook::StaticStorage::NumRequiredObjectsConstructed, Hook::StaticStorage::RequiredObjectsForInit.size());
         if (!Hook::StaticStorage::bAllRequiredObjectsConstructed)
         {
@@ -1198,11 +1285,6 @@ namespace RC::Unreal::UnrealInitializer
                 if (RequiredObject.ObjectConstructed) { continue; }
                 Output::send<LogLevel::Warning>(STR("  MISSING: {}\n"), RequiredObject.ObjectNameParts.back().ToString());
             }
-        }
-
-        if (!TypeChecker::store_all_object_types())
-        {
-            Output::send<LogLevel::Warning>(STR("Warning: TypeChecker was unable to find some or all of the required core objects (continuing in limited mode)\n"));
         }
 
         if (UnrealConfig.bHookProcessInternal || UnrealConfig.bHookProcessLocalScriptFunction)

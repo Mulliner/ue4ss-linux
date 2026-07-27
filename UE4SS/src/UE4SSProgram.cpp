@@ -975,8 +975,29 @@ namespace RC
             // The important thing is that ps_scan returns true (because all config flags are false)
             // so we don't get stuck in the scan retry loop.
 
+            // Set for each address supplied by UE4SS_Addresses.ini further below. The lambdas
+            // here are defined now but not invoked until ScanGame(), which runs after the ini is
+            // parsed, so they observe the final values. Without this, a heuristic/AOB guess would
+            // overwrite a known-good manual address — and a wrong address is worse than none,
+            // since callers check only whether an address is set, not whether it is correct.
+            struct ManualAddressOverrides
+            {
+                bool guobjectarray{};
+                bool fname_to_string{};
+                bool fname_constructor{};
+                bool static_construct_object{};
+                bool gmalloc{};
+                bool gnatives{};
+                bool gameengine_tick{};
+                bool process_internal{};
+                bool process_local_script_function{};
+                bool call_function_by_name_with_arguments{};
+            };
+            ManualAddressOverrides manual_overrides{};
+
             // Override GUObjectArray scan
                 config.ScanOverrides.guobjectarray = [&](std::vector<SignatureContainer>&, Unreal::Signatures::ScanResult& scan_result) {
+                    if (manual_overrides.guobjectarray) { return; }
                     void* addr = try_resolve("GUObjectArray");
                     if (addr)
                     {
@@ -1247,6 +1268,7 @@ namespace RC
 
                 // Override FName::ToString scan
                 config.ScanOverrides.fname_to_string = [&](std::vector<SignatureContainer>&, Unreal::Signatures::ScanResult& scan_result) {
+                    if (manual_overrides.fname_to_string) { return; }
                     void* addr = try_resolve("FName::ToString");
                     if (!addr) addr = try_resolve("_ZN5FName8ToStringEv");
                     // Try const variant
@@ -1473,6 +1495,7 @@ namespace RC
 
                 // Override GameEngine::Tick scan
                 config.ScanOverrides.gameengine_tick = [&](std::vector<SignatureContainer>&, Unreal::Signatures::ScanResult& scan_result) {
+                    if (manual_overrides.gameengine_tick) { return; }
                     void* addr = try_resolve("UGameEngine::Tick");
                     if (!addr) addr = try_resolve("_ZN11UGameEngine4TickEfd");
                     if (addr)
@@ -1488,8 +1511,10 @@ namespace RC
 
                 // Override StaticConstructObject scan
                 config.ScanOverrides.static_construct_object = [&](std::vector<SignatureContainer>&, Unreal::Signatures::ScanResult& scan_result) {
+                    if (manual_overrides.static_construct_object) { return; }
                     void* addr = try_resolve("StaticConstructObject_Internal");
                     if (!addr) addr = try_resolve("_ZL30StaticConstructObject_Internal");
+                    const bool from_aob_scan = (addr == nullptr);
 
                     // AOB-Scan fallback for StaticConstructObject_Internal
                     // Signature: (UClass* Class, UObject* InOuter, FName Name, EObjectFlags Flags, ...)
@@ -1558,10 +1583,20 @@ namespace RC
                         else UE4SS_DBG("[UE4SS] AOB scan: StaticConstructObject not found\n");
                     }
 
-                    if (addr)
+                    if (addr && !from_aob_scan)
                     {
                         Unreal::UObjectGlobals::SetupStaticConstructObjectInternalAddress(addr);
-                        scan_result.SuccessMessage.emplace_back(STR("StaticConstructObject found via dlsym/AOB scan"));
+                        scan_result.SuccessMessage.emplace_back(STR("StaticConstructObject found via dlsym"));
+                    }
+                    else if (addr)
+                    {
+                        // Deliberately dropped. PostInitialize registers a StaticConstructObject
+                        // detour unconditionally, so unlike the other scans this address always
+                        // gets hooked. InstallHook() skips cleanly when no address is set, but a
+                        // wrong one is patched into the live engine and takes down the game
+                        // thread. Pin a verified address in UE4SS_Addresses.ini to enable it.
+                        UE4SS_DBG( "[UE4SS] AOB scan: ignoring unverified StaticConstructObject candidate at %p (set it in UE4SS_Addresses.ini to use it)\n", addr);
+                        scan_result.SuccessMessage.emplace_back(STR("StaticConstructObject unresolved (unverified AOB candidate ignored)"));
                     }
                     else
                     {
@@ -1575,6 +1610,7 @@ namespace RC
                 // Heuristic: find a writable pointer that points to another writable pointer
                 // where the second pointer is in a writable segment (the FMalloc instance).
                 config.ScanOverrides.fmemory_free = [&](std::vector<SignatureContainer>&, Unreal::Signatures::ScanResult& scan_result) {
+                    if (manual_overrides.gmalloc) { return; }
                     void* addr = try_resolve("GMalloc");
 
                     if (!addr)
@@ -1657,6 +1693,7 @@ namespace RC
 
                 // Override FName constructor scan
                 config.ScanOverrides.fname_constructor = [&](std::vector<SignatureContainer>&, Unreal::Signatures::ScanResult& scan_result) {
+                    if (manual_overrides.fname_constructor) { return; }
                     void* addr = try_resolve("FName::FName");
                     // Try default constructor (no params) — not the one we need but might be useful
                     if (!addr) addr = try_resolve("_ZN5FNameC1Ev");
@@ -1862,6 +1899,7 @@ namespace RC
                 // Heuristic: find a contiguous array of at least 64 pointers where all point
                 // into executable PT_LOAD segments.
                 config.ScanOverrides.gnatives = [&](std::vector<SignatureContainer>&, Unreal::Signatures::ScanResult& scan_result) {
+                    if (manual_overrides.gnatives) { return; }
                     void* addr = try_resolve("GNatives");
 
                     if (!addr)
@@ -1997,6 +2035,7 @@ namespace RC
 
                 // Override ProcessInternal scan — needed for BP mod loading (BeginPlay hooks, function calls)
                 config.ScanOverrides.process_internal = [&](std::vector<SignatureContainer>&, Unreal::Signatures::ScanResult& scan_result) {
+                    if (manual_overrides.process_internal) { return; }
                     void* addr = try_resolve("UObject::ProcessInternal");
                     if (!addr) addr = try_resolve("_ZN6UObject15ProcessInternalER5FFrameRPv");
                     if (!addr) addr = try_resolve("ProcessInternal");
@@ -2096,6 +2135,7 @@ namespace RC
 
                 // Override ProcessLocalScriptFunction scan — needed for BP mod loading
                 config.ScanOverrides.process_local_script_function = [&](std::vector<SignatureContainer>&, Unreal::Signatures::ScanResult& scan_result) {
+                    if (manual_overrides.process_local_script_function) { return; }
                     void* addr = try_resolve("UObject::ProcessLocalScriptFunction");
                     if (!addr) addr = try_resolve("_ZN6UObject26ProcessLocalScriptFunctionER5FFrameRPv");
                     if (!addr) addr = try_resolve("ProcessLocalScriptFunction");
@@ -2200,6 +2240,7 @@ namespace RC
 
                 // Override CallFunctionByNameWithArguments scan — needed for console commands and BP mod loading
                 config.ScanOverrides.call_function_by_name_with_arguments = [&](std::vector<SignatureContainer>&, Unreal::Signatures::ScanResult& scan_result) {
+                    if (manual_overrides.call_function_by_name_with_arguments) { return; }
                     void* addr = try_resolve("UObject::CallFunctionByNameWithArguments");
                     if (!addr) addr = try_resolve("_ZN6UObject27CallFunctionByNameWithArgumentsEPKTRK18FOutputDeviceP6UObjectb");
                     if (!addr) addr = try_resolve("CallFunctionByNameWithArguments");
@@ -2342,51 +2383,71 @@ namespace RC
                             {
                                 Unreal::UObjectArray::SetupGUObjectArrayAddress(addr);
                                 UE4SS_DBG( "[UE4SS] Manual override: GUObjectArray = %p\n", addr);
+                                manual_overrides.guobjectarray = true;
                             }
                             if (void* addr = try_get_address(STR("Addresses"), STR("FNameToString")))
                             {
                                 Unreal::FName::ToStringInternal.assign_address(addr);
                                 UE4SS_DBG( "[UE4SS] Manual override: FNameToString = %p\n", addr);
+                                manual_overrides.fname_to_string = true;
                             }
                             if (void* addr = try_get_address(STR("Addresses"), STR("FNameConstructor")))
                             {
                                 Unreal::FName::ConstructorInternal.assign_address(addr);
                                 UE4SS_DBG( "[UE4SS] Manual override: FNameConstructor = %p\n", addr);
+                                manual_overrides.fname_constructor = true;
+
+                                // VerifyFNameConstructor() exists to prove a *scanned* address is
+                                // real by detouring it and waiting for the hook to fire. That
+                                // detour assumes the MSVC ABI and crashes the game thread on
+                                // Linux the moment the engine constructs an FName. A manually
+                                // supplied address is already known-good, so skip verification
+                                // and mark it verified — this also unlocks the init paths that
+                                // are gated on FNameVerificationStatus.
+                                Unreal::UnrealInitializer::StaticStorage::FNameVerificationStatus.store(true, std::memory_order_release);
+                                UE4SS_DBG( "[UE4SS] FNameConstructor supplied manually; skipping verification hook.\n");
                             }
                             if (void* addr = try_get_address(STR("Addresses"), STR("StaticConstructObject")))
                             {
                                 Unreal::UObjectGlobals::SetupStaticConstructObjectInternalAddress(addr);
                                 UE4SS_DBG( "[UE4SS] Manual override: StaticConstructObject = %p\n", addr);
+                                manual_overrides.static_construct_object = true;
                             }
                             if (void* addr = try_get_address(STR("Addresses"), STR("GMalloc")))
                             {
                                 Unreal::GMalloc = std::bit_cast<Unreal::FMalloc**>(addr);
                                 UE4SS_DBG( "[UE4SS] Manual override: GMalloc = %p\n", addr);
+                                manual_overrides.gmalloc = true;
                             }
                             if (void* addr = try_get_address(STR("Addresses"), STR("GNatives")))
                             {
                                 Unreal::GNatives_Internal = reinterpret_cast<Unreal::FNativeFuncPtr*>(addr);
                                 UE4SS_DBG( "[UE4SS] Manual override: GNatives = %p\n", addr);
+                                manual_overrides.gnatives = true;
                             }
                             if (void* addr = try_get_address(STR("Addresses"), STR("UGameEngineTick")))
                             {
                                 Unreal::UEngine::TickInternal.assign_address(addr);
                                 UE4SS_DBG( "[UE4SS] Manual override: UGameEngineTick = %p\n", addr);
+                                manual_overrides.gameengine_tick = true;
                             }
                             if (void* addr = try_get_address(STR("Addresses"), STR("ProcessInternal")))
                             {
                                 Unreal::UObject::ProcessInternalInternal.assign_address(addr);
                                 UE4SS_DBG( "[UE4SS] Manual override: ProcessInternal = %p\n", addr);
+                                manual_overrides.process_internal = true;
                             }
                             if (void* addr = try_get_address(STR("Addresses"), STR("ProcessLocalScriptFunction")))
                             {
                                 Unreal::UObject::ProcessLocalScriptFunctionInternal.assign_address(addr);
                                 UE4SS_DBG( "[UE4SS] Manual override: ProcessLocalScriptFunction = %p\n", addr);
+                                manual_overrides.process_local_script_function = true;
                             }
                             if (void* addr = try_get_address(STR("Addresses"), STR("CallFunctionByNameWithArguments")))
                             {
                                 Unreal::UObject::CallFunctionByNameWithArgumentsInternal.assign_address(addr);
                                 UE4SS_DBG( "[UE4SS] Manual override: CallFunctionByNameWithArguments = %p\n", addr);
+                                manual_overrides.call_function_by_name_with_arguments = true;
                             }
                         }
                         catch (const std::exception& e)
@@ -2664,6 +2725,16 @@ namespace RC
 #endif
             LuaMod::m_default_game_thread_method = settings_manager.General.DefaultExecuteInGameThreadMethod;
 
+            // NOTE: a mod's main.lua cannot use Unreal property access at load time on Linux.
+            // Mods are started here, from inside setup_unreal(), whereas init() does not reach
+            // setup_unreal_properties() until later, so the Lua property handler registry is
+            // still empty and every access fails with "Tried accessing unreal property without
+            // a registered handler". Calling setup_unreal_properties() here first was tried and
+            // does NOT fix it — the handlers only become usable once init() has progressed
+            // further — so the call was removed rather than left in looking load-bearing.
+            // Mods must therefore do property work from a deferred game-thread callback, which
+            // is the required pattern anyway (defer-from-hook). Verified by probe: identical
+            // property reads fail at load and succeed deferred.
             UE4SS_DBG( "[UE4SS] Linux: calling install_lua_mods()...\n");
             install_lua_mods();
             UE4SS_DBG( "[UE4SS] Linux: install_lua_mods() done.\n");

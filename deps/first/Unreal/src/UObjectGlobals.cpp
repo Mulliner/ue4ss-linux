@@ -116,6 +116,55 @@ namespace RC::Unreal::UObjectGlobals
     {
         UObject* FoundObject{};
 
+#ifdef __linux__
+        // Matching on GetFullName() means every candidate object has to be run through
+        // FName::ToString. On a stripped Linux build there is no scanned ToString address, so
+        // that round-trips through KismetStringLibrary::Conv_NameToString — which is not yet
+        // usable this early in init, making every comparison fail silently and leaving callers
+        // (including TypeChecker::store_all_object_types) with nulls.
+        //
+        // The FName-based finder compares name ids directly and needs no string conversion at
+        // all. Split the path into its component names and use it instead. A path looks like
+        // "/Script/CoreUObject.Default__Object" or "/Script/CoreUObject.Object:ExecuteUbergraph";
+        // the package keeps its leading slashes and the rest splits on '.' and ':'.
+        if (OrigInName)
+        {
+            constexpr auto DotSeparator = static_cast<CharType>('.');
+            constexpr auto SubObjectSeparator = static_cast<CharType>(':');
+
+            std::vector<FName> NameParts{};
+            const StringViewType FullPath{OrigInName};
+            size_t PartStart{};
+            for (size_t i = 0; i <= FullPath.size(); ++i)
+            {
+                const bool bAtEnd = (i == FullPath.size());
+                if (!bAtEnd && FullPath[i] != DotSeparator && FullPath[i] != SubObjectSeparator) { continue; }
+                if (i > PartStart)
+                {
+                    // Each part has to be a null-terminated copy. FName's constructor takes a raw
+                    // pointer and reads up to the first null, so a view into the middle of the
+                    // path would make the first part swallow everything after it and match nothing.
+                    const StringType Part{FullPath.substr(PartStart, i - PartStart)};
+                    auto PartName = FName(Part.c_str(), FNAME_Find);
+                    if (PartName == NAME_None)
+                    {
+                        // Same fallback Hook::AddRequiredObject uses: a name absent from the table
+                        // still has to become a real FName or the search short-circuits to null.
+                        PartName = FName(Part.c_str(), FNAME_Add);
+                    }
+                    NameParts.push_back(PartName);
+                }
+                PartStart = i + 1;
+            }
+
+            if (!NameParts.empty())
+            {
+                return StaticFindObject_InternalNoToStringFromNames(NameParts);
+            }
+        }
+        return nullptr;
+#endif
+
         UObjectGlobals::ForEachUObject([&](UObject* Object, [[maybe_unused]]int32_t ChunkIndex, [[maybe_unused]]int32_t ObjectIndex) {
             // This call to 'get_full_name' is a problem because it relies on offsets already being found
             // This function is called before offsets have been found as a way to check if required objects have been initialized
