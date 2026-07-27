@@ -8,6 +8,10 @@ if(UE4SS_GUI_ENABLED)
     add_subdirectory("EventViewerMod")
 endif()
 
+# IsleCPPUtilities has no UI and runs on a headless dedicated server, so it is
+# deliberately outside the GUI guard above.
+add_subdirectory("IsleCPPUtilities")
+
 # Organize targets in the "mods" folder
 get_property(TARGETS DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY BUILDSYSTEM_TARGETS)
 foreach(target ${TARGETS})
