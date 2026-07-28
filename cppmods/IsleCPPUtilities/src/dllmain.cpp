@@ -189,8 +189,10 @@ namespace
     constexpr const char* kBroadcastSteam = "all";
 
     // How long a MercyCorpse body persists before the engine's decay reclaims
-    // it (ActivateDeadbody's timer argument). The BodyDrop doc's default.
-    constexpr double kCorpseDecaySeconds = 3600.0;
+    // it (ActivateDeadbody's timer argument). Matches the CorpseWipe mod's
+    // 20-minute server rule so a body the wipe somehow misses still dies on
+    // schedule; the BodyDrop doc's default was 3600.
+    constexpr double kCorpseDecaySeconds = 1200.0;
     constexpr size_t kMaxQueue = 64;   // a backlog this deep means nobody is reading it anyway
 
     struct Pending
@@ -1192,6 +1194,19 @@ class IsleCPPUtilities : public CppUserModBase
         return true;
     }
 
+    auto get_bool_prop(UObject* obj, const CharType* name, bool& out) -> bool
+    {
+        FProperty* p = obj->GetPropertyByNameInChain(name);
+        if (!p) return false;
+        if (auto* bp = CastField<FBoolProperty>(p))
+        {
+            out = bp->GetPropertyValue(p->ContainerPtrToValuePtr<void>(obj));
+            return true;
+        }
+        out = *p->ContainerPtrToValuePtr<uint8>(obj) != 0;
+        return true;
+    }
+
     // Ground under (x, y), per EVRIMA_BodyDrop_Architecture.md: "never a blind
     // vertical offset" — SpawnActor succeeds in the void below the landscape
     // and the corpse is buried where nobody can eat it. Traces straight down
@@ -1407,6 +1422,58 @@ class IsleCPPUtilities : public CppUserModBase
                       " deadbody=" + (dbd ? "y" : "n") +
                       " forcenet=" + (net ? "y" : "n");
         }
+        return true;
+    }
+
+    // -------------------------------------------------------- corpse wiping
+    //
+    // The CorpseWipe Lua mod decides WHEN (a fixed cycle with announce
+    // warnings); this is the HOW — the same split as spawncorpse. A corpse on
+    // this build is a TICharacterBase pawn whose bIsDead is set: player
+    // deaths, AI deaths and spawncorpse bodies all end in that state, so one
+    // filter collects them all. Pawns still possessed by a controller are
+    // skipped — a freshly-dead player can stay attached to their body on the
+    // death screen, and destroying it under them is an untested client path;
+    // the next cycle collects the body once they release. Candidates are
+    // gathered first and destroyed after the walk so K2_DestroyActor never
+    // mutates the object array mid-enumeration.
+    auto wipe_corpses(std::string& detail) -> bool
+    {
+        UClass* cls = resolve_class("TICharacterBase");
+        if (!cls) { detail = "TICharacterBase class not found"; return false; }
+
+        std::vector<UObject*> corpses;
+        int held = 0;
+        UObjectGlobals::ForEachUObject([&](UObject* obj, int32, int32) -> LoopAction {
+            if (!obj || obj == cls || !obj->IsA(cls)) return LoopAction::Continue;
+            if (obj->IsUnreachable() ||
+                obj->HasAnyFlags(static_cast<EObjectFlags>(RF_BeginDestroyed | RF_FinishDestroyed)))
+                return LoopAction::Continue;
+            StringType nw = obj->GetName();
+            const std::string n(nw.begin(), nw.end());
+            if (n.rfind("Default__", 0) == 0) return LoopAction::Continue;
+
+            bool dead = false;
+            if (!get_bool_prop(obj, STR("bIsDead"), dead) || !dead) return LoopAction::Continue;
+
+            if (FProperty* pc = obj->GetPropertyByNameInChain(STR("Controller")))
+            {
+                if (*pc->ContainerPtrToValuePtr<UObject*>(obj) != nullptr)
+                {
+                    ++held;
+                    return LoopAction::Continue;
+                }
+            }
+            corpses.push_back(obj);
+            return LoopAction::Continue;
+        });
+
+        int wiped = 0;
+        for (UObject* c : corpses)
+            if (call_void_fn(c, STR("K2_DestroyActor"))) ++wiped;
+
+        detail = "wiped " + std::to_string(wiped) + "/" + std::to_string(corpses.size()) +
+                 " corpse(s), " + std::to_string(held) + " possessed skipped";
         return true;
     }
 
@@ -1675,10 +1742,12 @@ class IsleCPPUtilities : public CppUserModBase
         // Corpse verbs address a location, not a player (steam is "0"), so they
         // must run before the controller lookup everything else depends on.
         if (act.verb == "corpsescan" || act.verb == "spawncorpse" ||
+            act.verb == "wipecorpses" ||
             act.verb == "propdump" || act.verb == "classfns" || act.verb == "fnsig")
         {
             if      (act.verb == "corpsescan")  ok = scan_spawn_classes(detail);
             else if (act.verb == "spawncorpse") ok = spawn_corpse(act, detail);
+            else if (act.verb == "wipecorpses") ok = wipe_corpses(detail);
             else if (act.verb == "propdump")    ok = prop_dump(act.cls, detail);
             else if (act.verb == "fnsig")       ok = fn_signature(act.cls, detail);
             else                                ok = class_fns(act.cls, detail);
