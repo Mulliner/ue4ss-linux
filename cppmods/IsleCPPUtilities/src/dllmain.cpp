@@ -1410,6 +1410,48 @@ class IsleCPPUtilities : public CppUserModBase
         return true;
     }
 
+    // The clearance a pawn has RIGHT NOW: read the current location, trace the
+    // ground underneath it, keep the difference. A standing pawn measures its
+    // own capsule half-height this way - which nothing else on this build will
+    // report: GetSimpleCollisionCylinder read back nothing on the first live
+    // run. Returns -1 when the measure cannot be established.
+    auto measure_clearance(UObject* pawn) -> double
+    {
+        UFunction* getLoc = pawn->GetFunctionByNameInChain(FName(STR("K2_GetActorLocation"), FNAME_Find));
+        if (!getLoc) return -1.0;
+        FProperty* r = getLoc->GetReturnProperty();
+        if (!r) return -1.0;
+        const int32 ext = param_extent(getLoc, r);
+        if (ext != 24 && ext != 12) return -1.0;
+        std::vector<uint8> lb(getLoc->GetParmsSize(), 0);
+        pawn->ProcessEvent(getLoc, lb.data());
+        uint8* at = lb.data() + r->GetOffset_Internal();
+        double cx, cy, cz;
+        if (ext == 24)
+        {
+            auto* d = std::bit_cast<double*>(at);
+            cx = d[0]; cy = d[1]; cz = d[2];
+        }
+        else
+        {
+            auto* f = std::bit_cast<float*>(at);
+            cx = f[0]; cy = f[1]; cz = f[2];
+        }
+        double here_ground = 0.0;
+        std::string here_note;
+        // z_ref is passed 10000 LOW so the trace starts exactly at the pawn's
+        // center (trace_ground begins at z_ref+10000). Starting overhead hit
+        // the pawn's own body first - the "ground" came back as the top of the
+        // dino, the clearance went negative, and every live run fell back to
+        // the blind constant. A line trace that starts inside the capsule
+        // ignores it and hits the floor.
+        if (!trace_ground(pawn, cx, cy, cz - 10000.0, here_ground, here_note)) return -1.0;
+        // Swimming, falling or a canopy trace inflates the measure; keep it
+        // only in a plausible standing range.
+        const double c = cz - here_ground;
+        return (c > 20.0 && c < 900.0) ? c : -1.0;
+    }
+
     // Moves a live pawn to (x, y) at ground level. Underpins the web portal's
     // teleport (and the planned friend-request teleports): the Lua side and the
     // web app write {"verb":"teleport","steam":...,"x":...,"y":...,"z":...} to
@@ -1428,6 +1470,7 @@ class IsleCPPUtilities : public CppUserModBase
         // thread. The friend-teleport flow uses the latter so the web side
         // never needs to know coordinates at all.
         double tx = act.x, ty = act.y, tz = act.z;
+        UObject* dest_pawn = nullptr;
         if (!act.to.empty())
         {
             UObject* tctrl = controller_for(act.to);
@@ -1455,6 +1498,7 @@ class IsleCPPUtilities : public CppUserModBase
                 detail = "cannot teleport a player to themselves";
                 return false;
             }
+            dest_pawn = tpawn;
             tx = ty = tz = 0.0;
             if (UFunction* getLoc = tpawn->GetFunctionByNameInChain(FName(STR("K2_GetActorLocation"), FNAME_Find)))
             {
@@ -1500,53 +1544,25 @@ class IsleCPPUtilities : public CppUserModBase
             detail = "ground trace failed: " + trace_note;
             return false;
         }
-        // Arrival height = the clearance the pawn has RIGHT NOW: read the
-        // current location, trace the ground underneath it, keep the
-        // difference. A standing pawn measures its own capsule half-height
-        // this way - which nothing else on this build will report:
-        // GetSimpleCollisionCylinder read back nothing on the first live run,
-        // and the 400-unit fallback plus margin meant a 4m arrival drop and
-        // real fall damage. Self-measured, the feet land ~10 units up.
-        double clearance = 400.0;   // only if the self-measure fails
-        if (UFunction* getLoc = pawn->GetFunctionByNameInChain(FName(STR("K2_GetActorLocation"), FNAME_Find)))
+        // Arrival height = the clearance the pawn has RIGHT NOW - see
+        // measure_clearance. Self-measured, a standing traveller lands with
+        // its feet ~10 units up. When the traveller's own measure fails
+        // (resting, mid-air, swimming), a to= teleport can still measure the
+        // DESTINATION pawn: that player is standing on the very ground being
+        // arrived at, and the friend-teleport growth gate keeps both dinos in
+        // the same size class, so their clearance is the next-best estimate
+        // of the traveller's.
+        double clearance = measure_clearance(pawn);
+        if (clearance < 0.0 && dest_pawn != nullptr) clearance = measure_clearance(dest_pawn);
+        if (clearance < 0.0)
         {
-            if (FProperty* r = getLoc->GetReturnProperty())
-            {
-                const int32 ext = param_extent(getLoc, r);
-                if (ext == 24 || ext == 12)
-                {
-                    std::vector<uint8> lb(getLoc->GetParmsSize(), 0);
-                    pawn->ProcessEvent(getLoc, lb.data());
-                    uint8* at = lb.data() + r->GetOffset_Internal();
-                    double cx, cy, cz;
-                    if (ext == 24)
-                    {
-                        auto* d = std::bit_cast<double*>(at);
-                        cx = d[0]; cy = d[1]; cz = d[2];
-                    }
-                    else
-                    {
-                        auto* f = std::bit_cast<float*>(at);
-                        cx = f[0]; cy = f[1]; cz = f[2];
-                    }
-                    double here_ground = 0.0;
-                    std::string here_note;
-                    // z_ref is passed 10000 LOW so the trace starts exactly at
-                    // the pawn's center (trace_ground begins at z_ref+10000).
-                    // Starting overhead hit the pawn's own body first - the
-                    // "ground" came back as the top of the dino, the clearance
-                    // went negative, and every live run fell back to 400. A
-                    // line trace that starts inside the capsule ignores it and
-                    // hits the floor.
-                    if (trace_ground(pawn, cx, cy, cz - 10000.0, here_ground, here_note))
-                    {
-                        // Swimming, falling or a canopy trace inflates the
-                        // measure; keep it only in a plausible standing range.
-                        const double c = cz - here_ground;
-                        if (c > 20.0 && c < 900.0) clearance = c;
-                    }
-                }
-            }
+            // Blind fallback, sized by who can be on each path. A player
+            // destination means the juvie-gated friend teleport, where the
+            // 400 chosen for the largest adults was a 4m drop with real fall
+            // damage; 120 covers a juvie capsule with a stumble, not a fall.
+            // Coordinate teleports (admin rescues) can still move adults, so
+            // they keep the height that cannot embed a Rex in the ground.
+            clearance = act.to.empty() ? 400.0 : 120.0;
         }
         const double dest_z = ground_z + clearance + 10.0;
 
@@ -2494,7 +2510,7 @@ class IsleCPPUtilities : public CppUserModBase
         // The constructor is the earliest point that logs, and it runs before
         // on_program_start despite the name. If the build or the ABI is wrong,
         // this line is the one that will not appear.
-        Output::send<LogLevel::Verbose>(STR("[IsleCPPUtilities] ctor BUILD=k11 - rebranded IsleNotify -> IsleCPPUtilities\n"));
+        Output::send<LogLevel::Verbose>(STR("[IsleCPPUtilities] ctor BUILD=k12 - teleport arrival: destination-pawn clearance fallback, to= blind fallback 400 -> 120\n"));
     }
 
     ~IsleCPPUtilities() override
