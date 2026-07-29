@@ -199,12 +199,10 @@ namespace
     // accrue between walks, so this has to be far tighter than the wipe cycle,
     // and it is the resolution of the fallback age (a body can read up to this
     // much younger than it is).
-    // TEST: bumped to 300s to measure lag impact; revert after.
-    constexpr double kCensusIntervalSeconds = 300.0;
-    // Prime zone-visit counts, republished for PrimeWatch. 5s is well inside its
-    // 3s poll's tolerance and the walk is one pass over the object array.
-    // TEST: bumped to 300s to measure lag impact; revert after.
-    constexpr double kZoneVisitsIntervalSeconds = 300.0;
+    constexpr double kCensusIntervalSeconds = 10.0;
+    // Prime zone-visit counts, republished for PrimeWatch. Zones are cached on
+    // first discovery, so this now reads a small vector instead of ForEachUObject.
+    constexpr double kZoneVisitsIntervalSeconds = 5.0;
     constexpr const char* kZoneVisitsPath = "/isle_config/primewatch/zonevisits.json";
     constexpr size_t kMaxQueue = 64;   // a backlog this deep means nobody is reading it anyway
 
@@ -318,6 +316,12 @@ class IsleCPPUtilities : public CppUserModBase
     double m_census_at{0.0};
     double m_zone_at{0.0};
     bool m_census_primed{false};
+
+    // Cached zone actors (MigrationVisitorIDs + PatrolVisitorIDs). Populated
+    // once on first discovery and never rebuilt (zones don't spawn/despawn). Game
+    // thread only. This saves us from ForEachUObject every 5s.
+    std::vector<UObject*> m_zones;
+    bool m_zones_discovered{false};
 
     // Chat hook state. Registered once from the game-thread tick; the two flags
     // are live-tunable from notify.cfg (chat_diag=0/1, chat_blank=0/1) so the
@@ -1170,25 +1174,37 @@ class IsleCPPUtilities : public CppUserModBase
         return info;
     }
 
-    // dino ID -> {migration zones visited, patrol zones visited}. One walk of the
-    // object array; every zone that lists an id contributes one to that id.
+    // Discover all zone actors (those with MigrationVisitorIDs property) in one
+    // full ForEachUObject scan. Cached and never rebuilt since zones don't spawn/
+    // despawn. Only called on first publish_zone_visits() tick.
+    auto discover_zones() -> void
+    {
+        if (m_zones_discovered) return;
+        UObjectGlobals::ForEachUObject([&](UObject* obj, int32, int32) -> LoopAction {
+            if (!obj || obj->IsA<UClass>()) return LoopAction::Continue;
+            if (!obj->GetPropertyByNameInChain(STR("MigrationVisitorIDs"))) return LoopAction::Continue;
+            m_zones.push_back(obj);
+            return LoopAction::Continue;
+        });
+        m_zones_discovered = true;
+    }
+
+    // dino ID -> {migration zones visited, patrol zones visited}. Reads visitor
+    // arrays from cached zones, no full-object-array scan.
     //
     // MUST run on the game thread - this touches live UObjects. It is called from
     // drain(), which is the engine-tick post-hook, never from the tailer thread.
     auto collect_zone_visits(std::unordered_map<int64, std::pair<int, int>>& out) -> int
     {
-        int zones = 0;
-        UObjectGlobals::ForEachUObject([&](UObject* obj, int32, int32) -> LoopAction {
-            if (!obj || obj->IsA<UClass>()) return LoopAction::Continue;
-            if (!obj->GetPropertyByNameInChain(STR("MigrationVisitorIDs"))) return LoopAction::Continue;
-            ++zones;
-            for (int64 v : read_visitor_array(obj, STR("MigrationVisitorIDs"), 0).ints)
+        discover_zones();  // one-time discovery on first call
+        for (UObject* zone : m_zones) {
+            if (!zone) continue;  // object may have been destroyed
+            for (int64 v : read_visitor_array(zone, STR("MigrationVisitorIDs"), 0).ints)
                 ++out[v].first;
-            for (int64 v : read_visitor_array(obj, STR("PatrolVisitorIDs"), 0).ints)
+            for (int64 v : read_visitor_array(zone, STR("PatrolVisitorIDs"), 0).ints)
                 ++out[v].second;
-            return LoopAction::Continue;
-        });
-        return zones;
+        }
+        return m_zones.size();
     }
 
     // Publish those counts for PrimeWatch, which does the per-player half: Lua can
