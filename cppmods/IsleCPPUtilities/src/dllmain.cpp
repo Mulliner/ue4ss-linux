@@ -63,6 +63,8 @@
 #include <string>
 #include <sys/stat.h>
 #include <thread>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include <DynamicOutput/Output.hpp>
@@ -193,6 +195,17 @@ namespace
     // 20-minute server rule so a body the wipe somehow misses still dies on
     // schedule; the BodyDrop doc's default was 3600.
     constexpr double kCorpseDecaySeconds = 1200.0;
+    // How often the corpse first-seen census walks the object array. Ages only
+    // accrue between walks, so this has to be far tighter than the wipe cycle,
+    // and it is the resolution of the fallback age (a body can read up to this
+    // much younger than it is).
+    // TEST: bumped to 300s to measure lag impact; revert after.
+    constexpr double kCensusIntervalSeconds = 300.0;
+    // Prime zone-visit counts, republished for PrimeWatch. 5s is well inside its
+    // 3s poll's tolerance and the walk is one pass over the object array.
+    // TEST: bumped to 300s to measure lag impact; revert after.
+    constexpr double kZoneVisitsIntervalSeconds = 300.0;
+    constexpr const char* kZoneVisitsPath = "/isle_config/primewatch/zonevisits.json";
     constexpr size_t kMaxQueue = 64;   // a backlog this deep means nobody is reading it anyway
 
     struct Pending
@@ -222,6 +235,9 @@ namespace
         double y{0.0};
         double z{0.0};
         double g{0.6};      // growth of the spawned corpse: drives mesh size AND food value
+        // wipecorpses only: seconds a body must have been on the floor before it
+        // may be destroyed. 0 = the old age-blind behaviour, wipe everything.
+        double min_age{0.0};
         bool kill{false};
     };
 
@@ -293,6 +309,15 @@ class IsleCPPUtilities : public CppUserModBase
     std::deque<std::pair<std::chrono::steady_clock::time_point, Pending>> m_resend;
     // Live-tunable from notify.cfg; re-read once a second by the tailer thread.
     std::atomic<int> m_resend_ms{kDefaultResendMs};
+
+    // Corpse first-seen census: object name -> steady-clock seconds when this mod
+    // first saw that body on the floor. The fallback age source for wipecorpses'
+    // freshness gate, used whenever the engine's own stamp cannot be read. Game
+    // thread only (drain and the wipe both run there), so it needs no lock.
+    std::unordered_map<std::string, double> m_corpse_seen;
+    double m_census_at{0.0};
+    double m_zone_at{0.0};
+    bool m_census_primed{false};
 
     // Chat hook state. Registered once from the game-thread tick; the two flags
     // are live-tunable from notify.cfg (chat_diag=0/1, chat_blank=0/1) so the
@@ -1071,6 +1096,218 @@ class IsleCPPUtilities : public CppUserModBase
         return true;
     }
 
+    // ------------------------------------------------------ prime zone visits
+    //
+    // WHY THIS EXISTS. Prime conditions 5 and 6 are tallies - "visit 2 migration
+    // zones", "visit 4 patrol zones" - but FEligiblePrimeElder stores only the
+    // finished boolean, which flips at 2/2 and 4/4 and never in between, and no
+    // counter UPROPERTY exists anywhere on the pawn. The engine's own bump calls
+    // (TIDinosaurBase:SetNumberOfPrimeCondition5/6) are SCRIPT UFunctions, so
+    // UE4SS cannot hook them here: that needs the ProcessInternal detour, and
+    // ProcessInternal has no resolved address in UE4SS_Addresses.ini.
+    //
+    // The zones themselves hold the answer. Each is a TIEdibleSpawner
+    // (BP_EdiblePlantsSpawnable_C) carrying MigrationVisitorIDs and
+    // PatrolVisitorIDs; the count of zones listing a given dino IS that dino's
+    // progress. Reading them needs C++ - Lua TArray indexing is broken on this
+    // build - which is what this verb is for.
+    //
+    // THIS PASS IS DIAGNOSTIC ONLY. Two things are still unknown and both have
+    // to be answered from live data before any counting can be trusted:
+    //   1. the arrays' INNER TYPE (int32? FString? FName?), and
+    //   2. what a "visitor id" actually is - the pawn propdump shows FatherId,
+    //      MotherId, AncestorIds and IdPrefix but no obvious self-id.
+    // So rather than guess, this collects every visitor id in the world and then
+    // walks the pawn's own integer properties looking for one whose value is in
+    // that set. If the player has visited a zone, that match NAMES the id
+    // property outright, and the counting version writes itself.
+    //
+    // Stride is hand-computed on purpose: GetInner()->GetElementSize() returns 0
+    // on this build (see dump_struct_array), so FScriptArrayHelper cannot stride
+    // itself. Num() is safe - it reads the FScriptArray header only.
+    struct ArrInfo { int32 num = 0; std::string inner; std::vector<int64> ints; };
+
+    // One visitor array off one zone actor. Only integer inners are decoded;
+    // anything else is reported by type name and left alone, because misreading
+    // an FString array as ints would be silent garbage. (Live data says
+    // IntProperty for both arrays, so the other branches are belt and braces.)
+    //
+    // `cap` bounds how many elements are decoded - the diagnostic wants a sample,
+    // the publisher wants all of them.
+    auto read_visitor_array(UObject* obj, const CharType* name, int32 cap) -> ArrInfo
+    {
+        ArrInfo info;
+        FProperty* prop = obj->GetPropertyByNameInChain(name);
+        if (!prop) return info;
+        auto* arrProp = CastField<FArrayProperty>(prop);
+        if (!arrProp) { info.inner = "<not an array>"; return info; }
+
+        FProperty* inner = arrProp->GetInner();
+        if (inner)
+        {
+            StringType iw = inner->GetClass().GetName();
+            info.inner.assign(iw.begin(), iw.end());
+        }
+
+        FScriptArrayHelper helper(arrProp, prop->ContainerPtrToValuePtr<void>(obj));
+        info.num = helper.Num();
+        if (info.num <= 0) return info;
+
+        int32 stride = 0;
+        if      (info.inner == "IntProperty")   stride = 4;
+        else if (info.inner == "Int64Property") stride = 8;
+        if (stride != 4 && stride != 8) return info;   // decode ints only
+
+        uint8* base = reinterpret_cast<uint8*>(helper.GetRawPtr(0));
+        if (!base) return info;
+        const int32 n = (cap > 0 && info.num > cap) ? cap : info.num;
+        for (int32 i = 0; i < n; ++i)
+        {
+            uint8* e = base + static_cast<size_t>(i) * static_cast<size_t>(stride);
+            info.ints.push_back(stride == 4 ? static_cast<int64>(*std::bit_cast<int32*>(e))
+                                            : *std::bit_cast<int64*>(e));
+        }
+        return info;
+    }
+
+    // dino ID -> {migration zones visited, patrol zones visited}. One walk of the
+    // object array; every zone that lists an id contributes one to that id.
+    //
+    // MUST run on the game thread - this touches live UObjects. It is called from
+    // drain(), which is the engine-tick post-hook, never from the tailer thread.
+    auto collect_zone_visits(std::unordered_map<int64, std::pair<int, int>>& out) -> int
+    {
+        int zones = 0;
+        UObjectGlobals::ForEachUObject([&](UObject* obj, int32, int32) -> LoopAction {
+            if (!obj || obj->IsA<UClass>()) return LoopAction::Continue;
+            if (!obj->GetPropertyByNameInChain(STR("MigrationVisitorIDs"))) return LoopAction::Continue;
+            ++zones;
+            for (int64 v : read_visitor_array(obj, STR("MigrationVisitorIDs"), 0).ints)
+                ++out[v].first;
+            for (int64 v : read_visitor_array(obj, STR("PatrolVisitorIDs"), 0).ints)
+                ++out[v].second;
+            return LoopAction::Continue;
+        });
+        return zones;
+    }
+
+    // Publish those counts for PrimeWatch, which does the per-player half: Lua can
+    // read a pawn's ID (an IntProperty - verified reading back as a number) but
+    // NOT a TArray, so C++ contributes exactly the part Lua cannot do and stays
+    // out of the messaging, baselining and dedupe that PrimeWatch already owns.
+    //
+    // Written whole to a temp file and renamed, so a reader never sees half a
+    // file - the same discipline dinoStorage.ts uses for storage.json.
+    auto publish_zone_visits() -> void
+    {
+        const double now = steady_seconds();
+        if (m_zone_at > 0.0 && (now - m_zone_at) < kZoneVisitsIntervalSeconds) return;
+        m_zone_at = now;
+
+        std::unordered_map<int64, std::pair<int, int>> counts;
+        const int zones = collect_zone_visits(counts);
+
+        std::string body = "{\"zones\":" + std::to_string(zones) + ",\"ids\":{";
+        bool first = true;
+        for (const auto& [id, c] : counts)
+        {
+            if (!first) body += ",";
+            first = false;
+            body += "\"" + std::to_string(id) + "\":[" +
+                    std::to_string(c.first) + "," + std::to_string(c.second) + "]";
+        }
+        body += "}}";
+
+        const std::string tmp = std::string(kZoneVisitsPath) + ".tmp";
+        if (FILE* f = std::fopen(tmp.c_str(), "wb"))
+        {
+            std::fwrite(body.data(), 1, body.size(), f);
+            std::fclose(f);
+            std::rename(tmp.c_str(), kZoneVisitsPath);
+        }
+    }
+
+    auto zone_visits(const std::string& steam, std::string& detail) -> bool
+    {
+        int zones = 0, migNonEmpty = 0, patNonEmpty = 0;
+        std::string innerMig = "?", innerPat = "?";
+        std::unordered_set<int64> allIds;
+        std::string sample;
+
+        UObjectGlobals::ForEachUObject([&](UObject* obj, int32, int32) -> LoopAction {
+            if (!obj || obj->IsA<UClass>()) return LoopAction::Continue;
+            if (!obj->GetPropertyByNameInChain(STR("MigrationVisitorIDs"))) return LoopAction::Continue;
+            ++zones;
+
+            ArrInfo m = read_visitor_array(obj, STR("MigrationVisitorIDs"), 32);
+            ArrInfo p = read_visitor_array(obj, STR("PatrolVisitorIDs"), 32);
+            if (innerMig == "?" && !m.inner.empty()) innerMig = m.inner;
+            if (innerPat == "?" && !p.inner.empty()) innerPat = p.inner;
+            if (m.num > 0) ++migNonEmpty;
+            if (p.num > 0) ++patNonEmpty;
+            for (int64 v : m.ints) allIds.insert(v);
+            for (int64 v : p.ints) allIds.insert(v);
+
+            if ((m.num > 0 || p.num > 0) && sample.size() < 400)
+            {
+                StringType nw = obj->GetName();
+                sample += "\\n  " + std::string(nw.begin(), nw.end()) +
+                          " mig=" + std::to_string(m.num) + " pat=" + std::to_string(p.num);
+                for (size_t i = 0; i < m.ints.size() && i < 4; ++i)
+                    sample += (i ? "," : " migIds=") + std::to_string(m.ints[i]);
+                for (size_t i = 0; i < p.ints.size() && i < 4; ++i)
+                    sample += (i ? "," : " patIds=") + std::to_string(p.ints[i]);
+            }
+            return LoopAction::Continue;
+        });
+
+        detail = "zones=" + std::to_string(zones) +
+                 " migNonEmpty=" + std::to_string(migNonEmpty) +
+                 " patNonEmpty=" + std::to_string(patNonEmpty) +
+                 " innerMig=" + innerMig + " innerPat=" + innerPat +
+                 " distinctIds=" + std::to_string(allIds.size()) + sample;
+
+        if (steam.empty() || steam == "0") return true;
+
+        // Now the other half: which property on this player's dino carries a
+        // value that appears in a visitor array. That is the id, by definition.
+        UObject* ctrl = controller_for(steam);
+        if (!ctrl) { detail += "\\nplayer: no controller for " + steam; return true; }
+        UObject* pawn = nullptr;
+        if (UFunction* getPawn = ctrl->GetFunctionByNameInChain(FName(STR("K2_GetPawn"), FNAME_Find)))
+        {
+            std::vector<uint8> pb(getPawn->GetParmsSize(), 0);
+            ctrl->ProcessEvent(getPawn, pb.data());
+            if (FProperty* ret = getPawn->GetReturnProperty())
+                pawn = *std::bit_cast<UObject**>(pb.data() + ret->GetOffset_Internal());
+        }
+        if (!pawn) { detail += "\\nplayer: no live pawn"; return true; }
+
+        std::string hits, ints;
+        UClass* cls = pawn->GetClassPrivate();
+        if (cls)
+        {
+            for (FProperty* p : cls->ForEachPropertyInChain())
+            {
+                if (!p) continue;
+                StringType tw = p->GetClass().GetName();
+                const std::string type(tw.begin(), tw.end());
+                if (type != "IntProperty" && type != "Int64Property") continue;
+                const int64 v = (type == "IntProperty")
+                    ? static_cast<int64>(*p->ContainerPtrToValuePtr<int32>(pawn))
+                    : *p->ContainerPtrToValuePtr<int64>(pawn);
+                if (v == 0) continue;   // 0 is every uninitialised int, not an id
+                StringType nw = p->GetName();
+                const std::string nm(nw.begin(), nw.end());
+                if (ints.size() < 300) ints += " " + nm + "=" + std::to_string(v);
+                if (allIds.count(v)) hits += " " + nm + "=" + std::to_string(v);
+            }
+        }
+        detail += "\\nplayer " + steam + " idMatches:" + (hits.empty() ? " <none>" : hits);
+        detail += "\\nplayer intProps:" + (ints.empty() ? " <none>" : ints);
+        return true;
+    }
+
     // Diagnostic: one UFunction's full parameter layout - name, type, offset,
     // measured extent, and whether it is the return/out param. spec is
     // "Class:Function" with short names, or a full "/Script/..." path. This is
@@ -1204,6 +1441,47 @@ class IsleCPPUtilities : public CppUserModBase
             return true;
         }
         out = *p->ContainerPtrToValuePtr<uint8>(obj) != 0;
+        return true;
+    }
+
+    auto get_num_prop(UObject* obj, const CharType* name, double& out) -> bool
+    {
+        FProperty* p = obj->GetPropertyByNameInChain(name);
+        if (!p) return false;
+        StringType tw = p->GetClass().GetName();
+        const std::string t(tw.begin(), tw.end());
+        uint8* at = p->ContainerPtrToValuePtr<uint8>(obj);
+        if (t == "FloatProperty")  { out = *std::bit_cast<float*>(at);  return true; }
+        if (t == "DoubleProperty") { out = *std::bit_cast<double*>(at); return true; }
+        return false;
+    }
+
+    // Calls a UFunction that takes nothing and returns a number, and hands back
+    // the return value. call_num_fn WRITES a number into a parameter; this READS
+    // one out, which nothing else here needed until corpse ages. The return
+    // property's declared width is honoured rather than assumed - the same rule
+    // measure_clearance follows for its vector return.
+    auto call_num_ret(UObject* obj, const CharType* fnName, double& out) -> bool
+    {
+        UFunction* fn = obj->GetFunctionByNameInChain(FName(fnName, FNAME_Find));
+        if (!fn) return false;
+        FProperty* r = fn->GetReturnProperty();
+        if (!r) return false;
+        StringType tw = r->GetClass().GetName();
+        const std::string t(tw.begin(), tw.end());
+        const int32 width = (t == "FloatProperty") ? 4 : (t == "DoubleProperty") ? 8 : 0;
+        if (width == 0) return false;
+        const int32 parms = static_cast<int32>(fn->GetParmsSize());
+        const int32 at_off = r->GetOffset_Internal();
+        // Refuse anything whose return would read past the parameter buffer, and
+        // anything with real parameters: a zeroed buffer is only a safe call when
+        // the return value is all there is.
+        if (at_off < 0 || parms < at_off + width || parms > 16) return false;
+        std::vector<uint8> buf(static_cast<size_t>(parms), 0);
+        obj->ProcessEvent(fn, buf.data());
+        uint8* at = buf.data() + at_off;
+        out = (width == 4) ? static_cast<double>(*std::bit_cast<float*>(at))
+                           : *std::bit_cast<double*>(at);
         return true;
     }
 
@@ -1437,13 +1715,15 @@ class IsleCPPUtilities : public CppUserModBase
     // the next cycle collects the body once they release. Candidates are
     // gathered first and destroyed after the walk so K2_DestroyActor never
     // mutates the object array mid-enumeration.
-    auto wipe_corpses(std::string& detail) -> bool
+    // Every wipeable body on the map right now, paired with its object name (the
+    // census keys on that). Shared by the wipe and by the census that ages them,
+    // so one filter defines "corpse" for both and they can never disagree.
+    auto collect_corpses(std::vector<std::pair<UObject*, std::string>>& out, int& held) -> bool
     {
         UClass* cls = resolve_class("TICharacterBase");
-        if (!cls) { detail = "TICharacterBase class not found"; return false; }
+        if (!cls) return false;
 
-        std::vector<UObject*> corpses;
-        int held = 0;
+        held = 0;
         UObjectGlobals::ForEachUObject([&](UObject* obj, int32, int32) -> LoopAction {
             if (!obj || obj == cls || !obj->IsA(cls)) return LoopAction::Continue;
             if (obj->IsUnreachable() ||
@@ -1464,16 +1744,126 @@ class IsleCPPUtilities : public CppUserModBase
                     return LoopAction::Continue;
                 }
             }
-            corpses.push_back(obj);
+            out.emplace_back(obj, n);
             return LoopAction::Continue;
         });
+        return true;
+    }
+
+    // Seconds this body has been on the floor, from the engine's own clock, or
+    // -1 when it cannot be established.
+    //
+    // GetCorpseStateEnterTime() is a world-seconds stamp (probed live: no
+    // parameters, float return). World seconds "now" is recovered from the same
+    // actor as CreationTime + GetGameTimeSinceCreation(), which avoids needing a
+    // UWorld pointer this mod does not otherwise carry.
+    //
+    // The stamp is per corpse STAGE, so it resets when a body turns
+    // not-fresh/rotten/bone. That is harmless for a freshness gate: a body that
+    // has changed stage is already older than the fresh stage lasts, so it stays
+    // wipe-eligible either way. Only the first stage's age has to be right.
+    auto corpse_age_seconds(UObject* corpse) -> double
+    {
+        double since = 0.0, created = 0.0, enter = 0.0;
+        if (!call_num_ret(corpse, STR("GetGameTimeSinceCreation"), since)) return -1.0;
+        if (!get_num_prop(corpse, STR("CreationTime"), created)) return -1.0;
+        if (!call_num_ret(corpse, STR("GetCorpseStateEnterTime"), enter)) return -1.0;
+
+        const double now = created + since;
+        // enter <= 0 means the stamp was never written for this body; a stamp in
+        // the future means it is not the clock we think it is. Either way the
+        // census answers instead of this guessing.
+        if (enter <= 0.0 || enter > now + 1.0) return -1.0;
+        const double age = now - enter;
+        if (age < 0.0 || age > 86400.0) return -1.0;
+        return age;
+    }
+
+    static auto steady_seconds() -> double
+    {
+        using namespace std::chrono;
+        return duration<double>(steady_clock::now().time_since_epoch()).count();
+    }
+
+    // First-seen bookkeeping, the fallback for anything corpse_age_seconds
+    // cannot date. Runs on its own cadence because the wipe alone is 20 minutes
+    // apart - far too rare for any age to accrue between calls.
+    auto census_corpses() -> void
+    {
+        const double now = steady_seconds();
+        if (m_census_at > 0.0 && (now - m_census_at) < kCensusIntervalSeconds) return;
+        m_census_at = now;
+
+        std::vector<std::pair<UObject*, std::string>> corpses;
+        int held = 0;
+        if (!collect_corpses(corpses, held)) return;
+
+        // Bodies present at the FIRST census predate this mod's load (a .so
+        // reload must not hand every standing corpse a fresh grace period), so
+        // they are stamped as already ancient.
+        const double stamp = m_census_primed ? now : (now - 86400.0);
+
+        std::unordered_set<std::string> live;
+        live.reserve(corpses.size());
+        for (auto& [obj, name] : corpses)
+        {
+            live.insert(name);
+            m_corpse_seen.try_emplace(name, stamp);
+        }
+        for (auto it = m_corpse_seen.begin(); it != m_corpse_seen.end();)
+            it = (live.count(it->first) == 0) ? m_corpse_seen.erase(it) : std::next(it);
+
+        m_census_primed = true;
+    }
+
+    // min_age is a grace period in seconds: a body younger than it survives this
+    // wipe and is collected by the next one. 0 keeps the original age-blind
+    // behaviour, so an older CorpseWipe that sends no min_age is unaffected.
+    auto wipe_corpses(double min_age, std::string& detail) -> bool
+    {
+        std::vector<std::pair<UObject*, std::string>> corpses;
+        int held = 0;
+        if (!collect_corpses(corpses, held)) { detail = "TICharacterBase class not found"; return false; }
+
+        const double now = steady_seconds();
+        std::vector<UObject*> doomed;
+        int spared = 0, by_engine = 0, by_census = 0, undated = 0;
+
+        for (auto& [obj, name] : corpses)
+        {
+            if (min_age <= 0.0) { doomed.push_back(obj); continue; }
+
+            double age = corpse_age_seconds(obj);
+            if (age >= 0.0) ++by_engine;
+            else if (auto it = m_corpse_seen.find(name); it != m_corpse_seen.end())
+            {
+                age = now - it->second;
+                ++by_census;
+            }
+            else ++undated;
+
+            // An undated body has never been censused, so it appeared within the
+            // last census interval and is by definition brand new. Sparing is the
+            // recoverable mistake here - the next cycle collects it - whereas a
+            // wrong destroy cannot be undone.
+            if (age < 0.0 || age < min_age) { ++spared; continue; }
+            doomed.push_back(obj);
+        }
 
         int wiped = 0;
-        for (UObject* c : corpses)
+        for (UObject* c : doomed)
             if (call_void_fn(c, STR("K2_DestroyActor"))) ++wiped;
 
-        detail = "wiped " + std::to_string(wiped) + "/" + std::to_string(corpses.size()) +
+        detail = "wiped " + std::to_string(wiped) + "/" + std::to_string(doomed.size()) +
                  " corpse(s), " + std::to_string(held) + " possessed skipped";
+        if (min_age > 0.0)
+        {
+            detail += ", " + std::to_string(spared) + " spared as fresh (<" +
+                      std::to_string(static_cast<int>(min_age)) + "s)" +
+                      " [aged: engine=" + std::to_string(by_engine) +
+                      " census=" + std::to_string(by_census) +
+                      " undated=" + std::to_string(undated) + "]";
+        }
         return true;
     }
 
@@ -1743,13 +2133,16 @@ class IsleCPPUtilities : public CppUserModBase
         // must run before the controller lookup everything else depends on.
         if (act.verb == "corpsescan" || act.verb == "spawncorpse" ||
             act.verb == "wipecorpses" ||
-            act.verb == "propdump" || act.verb == "classfns" || act.verb == "fnsig")
+            act.verb == "propdump" || act.verb == "classfns" || act.verb == "fnsig" ||
+            act.verb == "zonevisits")
         {
             if      (act.verb == "corpsescan")  ok = scan_spawn_classes(detail);
             else if (act.verb == "spawncorpse") ok = spawn_corpse(act, detail);
-            else if (act.verb == "wipecorpses") ok = wipe_corpses(detail);
+            else if (act.verb == "wipecorpses") ok = wipe_corpses(act.min_age, detail);
             else if (act.verb == "propdump")    ok = prop_dump(act.cls, detail);
             else if (act.verb == "fnsig")       ok = fn_signature(act.cls, detail);
+            // steam is the dino whose id we are trying to name; "0" = world only.
+            else if (act.verb == "zonevisits")  ok = zone_visits(act.to, detail);
             else                                ok = class_fns(act.cls, detail);
             Output::send<LogLevel::Verbose>(STR("[IsleCPPUtilities] {}: {} ({})\n"),
                                             StringType(act.verb.begin(), act.verb.end()),
@@ -2426,6 +2819,7 @@ class IsleCPPUtilities : public CppUserModBase
         act.z = num_of("z");
         if (const double g = num_of("g"); g > 0.0 && g <= 1.0) act.g = g;
         if (const double s = num_of("secs"); s > 0.0 && s <= 300.0) act.secs = s;
+        if (const double a = num_of("min_age"); a > 0.0 && a <= 3600.0) act.min_age = a;
         if (const double m = num_of("mode"); m > 0.0 && m <= 255.0) act.mode = static_cast<int>(m);
         act.admin = json_string_field(line, "admin") == "1";
 
@@ -2440,6 +2834,11 @@ class IsleCPPUtilities : public CppUserModBase
     {
         resolve_once();
         if (!m_chat_hooked.load()) register_chat_hook();
+
+        // Self-throttled to kCensusIntervalSeconds; this runs every engine tick.
+        census_corpses();
+        // Same deal, kZoneVisitsIntervalSeconds. Both must be on this thread.
+        publish_zone_visits();
 
         // Hand captured slash commands to the Lua dispatcher. Written from the
         // tick rather than from the RPC hook so the hook itself never does
