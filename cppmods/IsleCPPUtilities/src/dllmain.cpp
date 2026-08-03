@@ -1174,15 +1174,25 @@ class IsleCPPUtilities : public CppUserModBase
         return info;
     }
 
-    // Discover all zone actors (those with MigrationVisitorIDs property) in one
-    // full ForEachUObject scan. Cached and never rebuilt since zones don't spawn/
-    // despawn. Only called on first publish_zone_visits() tick.
+    // Discover all zone actors (those with MigrationVisitorIDs OR PatrolVisitorIDs)
+    // in one full ForEachUObject scan. Cached and never rebuilt since zones don't
+    // spawn/despawn. Only called on first publish_zone_visits() tick.
+    //
+    // Gating on MigrationVisitorIDs alone (the original version of this function)
+    // silently dropped every actor that carries PatrolVisitorIDs but not
+    // MigrationVisitorIDs - live evidence (zone_visits diagnostic, run while an
+    // admin stood inside a Patrol Zone) showed patNonEmpty=0 across all 82
+    // Migration-gated actors even with an active visit in progress, meaning
+    // Patrol Zones are not all instances of the same class as Migration Zones.
+    // The OR gate below is the general fix regardless of which class turns out
+    // to carry which property.
     auto discover_zones() -> void
     {
         if (m_zones_discovered) return;
         UObjectGlobals::ForEachUObject([&](UObject* obj, int32, int32) -> LoopAction {
             if (!obj || obj->IsA<UClass>()) return LoopAction::Continue;
-            if (!obj->GetPropertyByNameInChain(STR("MigrationVisitorIDs"))) return LoopAction::Continue;
+            if (!obj->GetPropertyByNameInChain(STR("MigrationVisitorIDs")) &&
+                !obj->GetPropertyByNameInChain(STR("PatrolVisitorIDs"))) return LoopAction::Continue;
             m_zones.push_back(obj);
             return LoopAction::Continue;
         });
@@ -1246,17 +1256,44 @@ class IsleCPPUtilities : public CppUserModBase
     auto zone_visits(const std::string& steam, std::string& detail) -> bool
     {
         int zones = 0, migNonEmpty = 0, patNonEmpty = 0;
+        int migOnlyClass = 0, patOnlyClass = 0, bothClass = 0;
+        // Activation state: BP_MigrationManager assigns bMigrateHere to whichever
+        // zone(s) are the current live target(s); NumberOfActivations is that
+        // zone's lifetime activation count. A zone with bMigrateHere=false and
+        // NumberOfActivations=0 has never been selected, so standing inside it
+        // - for any duration - writes nothing, regardless of dwell time.
+        int activeNow = 0, everActivated = 0;
+        std::string activeSample;
         std::string innerMig = "?", innerPat = "?";
         std::unordered_set<int64> allIds;
-        std::string sample;
+        std::string sample, patOnlySample;
 
         UObjectGlobals::ForEachUObject([&](UObject* obj, int32, int32) -> LoopAction {
             if (!obj || obj->IsA<UClass>()) return LoopAction::Continue;
-            if (!obj->GetPropertyByNameInChain(STR("MigrationVisitorIDs"))) return LoopAction::Continue;
+            const bool hasMig = obj->GetPropertyByNameInChain(STR("MigrationVisitorIDs")) != nullptr;
+            const bool hasPat = obj->GetPropertyByNameInChain(STR("PatrolVisitorIDs")) != nullptr;
+            if (!hasMig && !hasPat) return LoopAction::Continue;
             ++zones;
+            if (hasMig && hasPat) ++bothClass;
+            else if (hasMig) ++migOnlyClass;
+            else ++patOnlyClass;
 
-            ArrInfo m = read_visitor_array(obj, STR("MigrationVisitorIDs"), 32);
-            ArrInfo p = read_visitor_array(obj, STR("PatrolVisitorIDs"), 32);
+            bool migrateHere = false;
+            get_bool_prop(obj, STR("bMigrateHere"), migrateHere);
+            int32 activations = 0;
+            if (FProperty* ap = obj->GetPropertyByNameInChain(STR("NumberOfActivations")))
+                activations = *ap->ContainerPtrToValuePtr<int32>(obj);
+            if (migrateHere) ++activeNow;
+            if (activations > 0) ++everActivated;
+            if (migrateHere && activeSample.size() < 300)
+            {
+                StringType nw = obj->GetName();
+                activeSample += "\\n  ACTIVE " + std::string(nw.begin(), nw.end()) +
+                                 " activations=" + std::to_string(activations);
+            }
+
+            ArrInfo m = hasMig ? read_visitor_array(obj, STR("MigrationVisitorIDs"), 32) : ArrInfo{};
+            ArrInfo p = hasPat ? read_visitor_array(obj, STR("PatrolVisitorIDs"), 32) : ArrInfo{};
             if (innerMig == "?" && !m.inner.empty()) innerMig = m.inner;
             if (innerPat == "?" && !p.inner.empty()) innerPat = p.inner;
             if (m.num > 0) ++migNonEmpty;
@@ -1274,14 +1311,28 @@ class IsleCPPUtilities : public CppUserModBase
                 for (size_t i = 0; i < p.ints.size() && i < 4; ++i)
                     sample += (i ? "," : " patIds=") + std::to_string(p.ints[i]);
             }
+            // A patrol-only class is exactly the case the old Migration-only gate
+            // dropped silently. Name it so we know for certain what it is.
+            if (!hasMig && hasPat && patOnlySample.size() < 200)
+            {
+                UClass* cls = obj->GetClassPrivate();
+                StringType cn = cls ? cls->GetName() : STR("<noclass>");
+                patOnlySample += "\\n  patrolOnlyClass=" + std::string(cn.begin(), cn.end()) +
+                                  " pat=" + std::to_string(p.num);
+            }
             return LoopAction::Continue;
         });
 
         detail = "zones=" + std::to_string(zones) +
+                 " migOnlyClass=" + std::to_string(migOnlyClass) +
+                 " patOnlyClass=" + std::to_string(patOnlyClass) +
+                 " bothClass=" + std::to_string(bothClass) +
+                 " activeNow=" + std::to_string(activeNow) +
+                 " everActivated=" + std::to_string(everActivated) +
                  " migNonEmpty=" + std::to_string(migNonEmpty) +
                  " patNonEmpty=" + std::to_string(patNonEmpty) +
                  " innerMig=" + innerMig + " innerPat=" + innerPat +
-                 " distinctIds=" + std::to_string(allIds.size()) + sample;
+                 " distinctIds=" + std::to_string(allIds.size()) + sample + activeSample + patOnlySample;
 
         if (steam.empty() || steam == "0") return true;
 
