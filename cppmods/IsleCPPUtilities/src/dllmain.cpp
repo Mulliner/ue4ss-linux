@@ -55,6 +55,7 @@
 #include <atomic>
 #include <cctype>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -2050,9 +2051,6 @@ class IsleCPPUtilities : public CppUserModBase
                 detail = "could not read target position";
                 return false;
             }
-            // Arrive beside, not inside: 500 units sideways keeps two large
-            // capsules from starting the reunion overlapped.
-            tx += 500.0;
         }
 
         if (tx == 0.0 && ty == 0.0 && tz == 0.0)
@@ -2061,11 +2059,58 @@ class IsleCPPUtilities : public CppUserModBase
             return false;
         }
 
-        double ground_z = 0.0;
-        std::string trace_note;
-        if (!trace_ground(pawn, tx, ty, tz, ground_z, trace_note))
+        // A single trace_ground call trusts whatever it hits first - a tree
+        // canopy, a rock, a roof - as "ground". That was fine when there was
+        // no better information, but here there is: tz is either the
+        // friend's own live altitude (they are standing on real ground right
+        // now) or the admin's typed reference. Try a small set of candidate
+        // XY spots and keep the first whose traced ground lands within
+        // kGroundTolerance of that known-good altitude, rather than
+        // whatever the first candidate's trace happens to hit. This is what
+        // let friend-teleports drop a player from the sky: a fixed +500
+        // sideways offset traced onto elevated geometry with nothing to
+        // check the result against.
+        constexpr double kGroundTolerance = 500.0;
+        std::vector<std::pair<double, double>> candidates;
+        if (dest_pawn != nullptr)
         {
-            detail = "ground trace failed: " + trace_note;
+            // Arrive beside, not inside: a ring of directions around the
+            // friend, so two large capsules don't start the reunion
+            // overlapped, and a single bad direction (cliff, water, a tree)
+            // isn't the only spot tried.
+            constexpr double kPi = 3.14159265358979323846;
+            for (double radius : {500.0, 300.0, 150.0})
+                for (int i = 0; i < 8; ++i)
+                {
+                    const double a = i * (kPi / 4.0);
+                    candidates.emplace_back(radius * std::cos(a), radius * std::sin(a));
+                }
+        }
+        else
+        {
+            // A coordinate teleport should land exactly where asked; only
+            // nudge nearby if the exact spot's trace looks implausible.
+            candidates = {{0.0, 0.0},
+                          {50.0, 0.0}, {-50.0, 0.0}, {0.0, 50.0}, {0.0, -50.0},
+                          {150.0, 0.0}, {-150.0, 0.0}, {0.0, 150.0}, {0.0, -150.0}};
+        }
+
+        const double rx = tx, ry = ty, ref_z = tz;
+        double ground_z = 0.0;
+        bool found_ground = false;
+        for (const auto& [dx, dy] : candidates)
+        {
+            double gz = 0.0;
+            std::string note;
+            if (!trace_ground(pawn, rx + dx, ry + dy, ref_z, gz, note)) continue;
+            if (std::abs(gz - ref_z) > kGroundTolerance) continue;
+            tx = rx + dx; ty = ry + dy; ground_z = gz;
+            found_ground = true;
+            break;
+        }
+        if (!found_ground)
+        {
+            detail = "no safe ground found near target";
             return false;
         }
         // Arrival height = the clearance the pawn has RIGHT NOW - see
